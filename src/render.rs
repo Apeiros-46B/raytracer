@@ -1,45 +1,23 @@
-// use std::time::Duration;
-
 use eframe::{
 	egui_glow,
 	glow::{self, Context, HasContext},
-	// glow::Query,
 };
 
-use crate::app::RaytracingApp;
-
-#[derive(Clone, Copy)]
-pub struct Uniforms {
-	scr_size: egui::Vec2,
-	sky_color: [f32; 3],
-	max_bounces: u32,
-}
-
-// pub fn render_stats_window(egui: &egui::Context, frame_time: Duration) {
-// 	egui::Window::new("Render Stats").show(egui, |ui| {
-// 		let ms = frame_time.as_millis();
-// 		let fps = if ms == 0 { 0 } else { 1000 / ms };
-// 		ui.label(format!("FPS: {fps}"));
-// 		ui.label(format!("Frame time: {frame_time:#?}"))
-// 	});
-// }
+use crate::{app::RaytracingApp, scene::Spheres, uniform::Uniforms};
 
 impl RaytracingApp {
 	pub fn paint(&mut self, ui: &mut egui::Ui) {
 		let screen = ui.clip_rect();
 		let renderer = self.renderer.clone();
-
-		let uniforms = Uniforms {
-			scr_size: screen.size(),
-			sky_color: self.settings.sky_color,
-			max_bounces: self.settings.max_bounces,
-		};
+		let uniforms = Uniforms::new(&self.settings, screen.size().into());
 
 		let callback = egui::PaintCallback {
 			rect: screen,
 			callback: std::sync::Arc::new(egui_glow::CallbackFn::new(
-				move |_info, painter| {
-					renderer.lock().paint(painter.gl(), uniforms);
+				move |_, painter| {
+					let mut raytracer = renderer.lock();
+					raytracer.paint(painter.gl(), uniforms);
+					raytracer.frame_index += 1;
 				},
 			)),
 		};
@@ -49,43 +27,37 @@ impl RaytracingApp {
 
 pub struct Raytracer {
 	program: glow::Program,
-	vertex_array: glow::VertexArray,
-	// timer_query: Query,
-	// timer_query_nanos: u64,
-	// pub frame_time: Duration,
+	verts: glow::VertexArray,
+	spheres: Spheres,
+	frame_index: u32,
 }
 
 impl Raytracer {
 	pub fn new(gl: &Context) -> Self {
+		let srcs = [
+			(glow::VERTEX_SHADER, include_str!("shaders/vsh.glsl")),
+			(glow::FRAGMENT_SHADER, include_str!("shaders/fsh.glsl")),
+		];
+
 		let shader_version = if cfg!(target_arch = "wasm32") {
 			"#version 300 es"
 		} else {
 			"#version 330"
 		};
 
-		let sources = [
-			(glow::VERTEX_SHADER, include_str!("shaders/vsh.glsl")),
-			(glow::FRAGMENT_SHADER, include_str!("shaders/fsh.glsl")),
-		];
-
 		unsafe {
 			let program = gl.create_program().expect("failed to create program");
 
 			// {{{ shader instantiation boilerplate
-			let shaders: Vec<_> = sources
+			let shaders: Vec<_> = srcs
 				.iter()
-				.map(|(shader_type, shader_source)| {
-					let shader = gl
-						.create_shader(*shader_type)
-						.expect("failed to create shader");
-					gl.shader_source(
-						shader,
-						&format!("{shader_version}\n{shader_source}"),
-					);
+				.map(|(ty, src)| {
+					let shader = gl.create_shader(*ty).expect("failed to create shader");
+					gl.shader_source(shader, &format!("{shader_version}\n{src}"));
 					gl.compile_shader(shader);
 					assert!(
 						gl.get_shader_compile_status(shader),
-						"failed to compile {shader_type}: {}",
+						"failed to compile {ty}: {}",
 						gl.get_shader_info_log(shader)
 					);
 					gl.attach_shader(program, shader);
@@ -106,20 +78,18 @@ impl Raytracer {
 			}
 			// }}}
 
-			let vertex_array = gl
+			let verts = gl
 				.create_vertex_array()
 				.expect("failed to create vertex array");
 
-			// let timer_query = gl
-			// 	.create_query()
-			// 	.expect("failed to create timer query object");
-
 			Self {
 				program,
-				vertex_array,
-				// timer_query,
-				// timer_query_nanos: 0,
-				// frame_time: Duration::default(),
+				verts,
+				spheres: Spheres {
+					radii: Box::new([0.5, 0.3]),
+					pos: Box::new([0.0, 0.0, -0.4, 0.4, 0.0, 0.0]),
+				},
+				frame_index: 0,
 			}
 		}
 	}
@@ -127,57 +97,79 @@ impl Raytracer {
 	pub fn destroy(&self, gl: &Context) {
 		unsafe {
 			gl.delete_program(self.program);
-			gl.delete_vertex_array(self.vertex_array);
+			gl.delete_vertex_array(self.verts);
 		}
 	}
 
 	pub fn paint(&mut self, gl: &Context, uniforms: Uniforms) {
 		unsafe {
-			// gl.begin_query(glow::TIME_ELAPSED, self.timer_query);
-
 			gl.use_program(Some(self.program));
-			self.uniforms(gl, uniforms);
-			gl.bind_vertex_array(Some(self.vertex_array));
+			self.apply_uniforms(gl, uniforms);
+			gl.bind_vertex_array(Some(self.verts));
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
-
-			// gl.end_query(glow::TIME_ELAPSED);
-
-			// let mut available = 0;
-			// while available == 0 {
-			// 	available = gl.get_query_parameter_u32(
-			// 		self.timer_query,
-			// 		glow::QUERY_RESULT_AVAILABLE,
-			// 	);
-			// }
-
-			// the query result is in nanoseconds
-			// gl.get_query_parameter_u64_with_offset(
-			// 	self.timer_query,
-			// 	glow::QUERY_RESULT,
-			// 	(&mut self.timer_query_nanos) as *mut u64 as usize,
-			// );
-			// self.frame_time = Duration::from_nanos(self.timer_query_nanos);
 		}
 	}
 
-	pub fn uniforms(&mut self, gl: &Context, uniforms: Uniforms) {
+	pub fn apply_uniforms(&mut self, gl: &Context, uniforms: Uniforms) {
 		unsafe {
 			gl.uniform_2_f32(
-				gl.get_uniform_location(self.program, "u_scr_size").as_ref(),
-				uniforms.scr_size.x,
-				uniforms.scr_size.y,
+				gl.get_uniform_location(self.program, "scr_size").as_ref(),
+				uniforms.scr_size[0],
+				uniforms.scr_size[1],
 			);
 
 			gl.uniform_3_f32(
-				gl.get_uniform_location(self.program, "u_sky_color").as_ref(),
+				gl.get_uniform_location(self.program, "sky_color").as_ref(),
 				uniforms.sky_color[0],
 				uniforms.sky_color[1],
 				uniforms.sky_color[2],
 			);
 
+			gl.uniform_3_f32(
+				gl.get_uniform_location(self.program, "sun_dir").as_ref(),
+				uniforms.sun_dir[0],
+				uniforms.sun_dir[1],
+				uniforms.sun_dir[2],
+			);
+
+			gl.uniform_1_f32(
+				gl.get_uniform_location(self.program, "sun_strength")
+					.as_ref(),
+				uniforms.sun_strength,
+			);
+
 			gl.uniform_1_u32(
-				gl.get_uniform_location(self.program, "u_max_bounces").as_ref(),
+				gl.get_uniform_location(self.program, "bounces").as_ref(),
 				uniforms.max_bounces,
+			);
+
+			gl.uniform_1_u32(
+				gl.get_uniform_location(self.program, "frame_index").as_ref(),
+				self.frame_index,
+			);
+
+			gl.uniform_1_u32(
+				gl.get_uniform_location(self.program, "sphere_count")
+					.as_ref(),
+				self.spheres.radii.len().try_into().unwrap(),
+			);
+
+			gl.uniform_1_f32_slice(
+				gl.get_uniform_location(self.program, "sphere_radii")
+					.as_ref(),
+				&self.spheres.radii,
+			);
+
+			gl.uniform_3_f32_slice(
+				gl.get_uniform_location(self.program, "sphere_pos")
+					.as_ref(),
+				&self.spheres.pos,
+			);
+
+			// DEBUG
+			gl.uniform_1_f32(
+				gl.get_uniform_location(self.program, "sphere_x").as_ref(),
+				uniforms.sphere_x,
 			);
 		}
 	}

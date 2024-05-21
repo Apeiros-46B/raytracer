@@ -3,10 +3,7 @@ use std::sync::Arc;
 // use eframe::glow::HasContext;
 use egui::mutex::Mutex;
 
-use crate::{
-	render::Raytracer,
-	settings::Settings,
-};
+use crate::{render::Raytracer, settings::Settings};
 
 pub struct RaytracingApp {
 	pub renderer: Arc<Mutex<Raytracer>>,
@@ -24,13 +21,6 @@ impl RaytracingApp {
 		}
 
 		let gl = cc.gl.as_ref().expect("failed to obtain GL context");
-
-		// if cfg!(target_arch = "wasm32") {
-		//  TODO: this check fails
-		// 	assert!(gl.supported_extensions().contains("EXT_disjoint_timer_query"));
-		// } else {
-		// 	assert!(gl.supported_extensions().contains("GL_ARB_timer_query"));
-		// }
 
 		// remove comically large window shadow
 		cc.egui_ctx.set_visuals(egui::Visuals {
