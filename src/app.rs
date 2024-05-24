@@ -46,7 +46,7 @@ impl eframe::App for RaytracingApp {
 	// }
 
 	fn update(&mut self, egui: &egui::Context, _frame: &mut eframe::Frame) {
-		self.settings.window(egui);
+		self.settings.window(egui, self.renderer.lock().last_frametime);
 
 		egui::CentralPanel::default().show(egui, |ui| {
 			self.paint(ui);

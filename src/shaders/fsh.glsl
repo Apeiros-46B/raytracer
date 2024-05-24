@@ -31,9 +31,6 @@ uniform uint sphere_count;
 uniform float sphere_radii[MAX_SPHERES];
 uniform vec3 sphere_positions[MAX_SPHERES];
 
-// DEBUG
-uniform float sphere_x;
-
 // 0x7f7f_fff = 0b0_11111110_11111111111111111111111 = 2139095039
 const float max_float = intBitsToFloat(2139095039);
 
@@ -81,7 +78,7 @@ void main() {
 	// seed *= frame_index;
 	//
 	// Ray primary = Ray(vec3(0, 0, 2), vec3(current_pixel(), -1));
-	// Sphere sp = Sphere(0.5, vec3(sphere_x, 0.0, 0.0));
+	// Sphere sp = Sphere(0.5, vec3(0));
 	// RayHit hit = ray_sphere_intersection(primary, sp);
 	//
 	// if (hit.hit) {

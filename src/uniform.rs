@@ -8,7 +8,6 @@ pub struct Uniforms {
 	pub sun_strength: f32,
 
 	pub max_bounces: u32,
-	pub sphere_x: f32,
 }
 
 impl Uniforms {
@@ -34,7 +33,6 @@ impl Uniforms {
 			sun_strength: settings.sky.sun_strength,
 
 			max_bounces: settings.render.max_bounces,
-			sphere_x: settings.sphere_x,
 		}
 	}
 }

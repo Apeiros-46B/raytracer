@@ -8,7 +8,6 @@ pub struct Settings {
 	pub sky: SkySettings,
 	pub render: RenderSettings,
 	// pub camera: Camera,
-	pub sphere_x: f32,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -79,8 +78,22 @@ impl Default for RenderSettings {
 // }
 
 impl Settings {
-	pub fn window(&mut self, egui: &egui::Context) {
+	pub fn window(
+		&mut self,
+		egui: &egui::Context,
+		frametime: Option<web_time::Duration>,
+	) {
 		egui::Window::new("Settings").show(egui, |ui| {
+			if let Some(frametime) = frametime {
+				let ms = frametime.as_millis();
+				let fps = if ms != 0 {
+					1000 / ms
+				} else {
+					0
+				};
+				ui.label(format!("Frametime: {:#?} ({fps} FPS)", frametime));
+			}
+
 			ui.collapsing("World settings", |ui| {
 				ui.horizontal(|ui| {
 					ui.label("Background color:");
@@ -107,12 +120,6 @@ impl Settings {
 				ui.horizontal(|ui| {
 					ui.label("Sun rotation:");
 					ui.drag_angle(&mut self.sky.sun_rotation);
-				});
-
-				// DEBUG
-				ui.horizontal(|ui| {
-					ui.label("Sphere X:");
-					ui.add(egui::DragValue::new(&mut self.sphere_x).speed(0.005));
 				});
 			});
 

@@ -1,22 +1,36 @@
+use web_time::Instant;
+
 use eframe::{
 	egui_glow,
 	glow::{self, Context, HasContext},
 };
 
-use crate::{app::RaytracingApp, scene::Spheres, uniform::Uniforms};
+use crate::{
+	app::RaytracingApp, camera::Camera, scene::Spheres, uniform::Uniforms,
+};
 
 impl RaytracingApp {
 	pub fn paint(&mut self, ui: &mut egui::Ui) {
-		let screen = ui.clip_rect();
-		let renderer = self.renderer.clone();
-		let uniforms = Uniforms::new(&self.settings, screen.size().into());
+		let scr = ui.clip_rect();
+		let scr_size: [f32; 2] = scr.size().into();
+		let uniforms = Uniforms::new(&self.settings, scr_size);
 
+		let renderer = self.renderer.clone();
 		let callback = egui::PaintCallback {
-			rect: screen,
+			rect: scr,
 			callback: std::sync::Arc::new(egui_glow::CallbackFn::new(
 				move |_, painter| {
 					let mut raytracer = renderer.lock();
+
+					raytracer.last_frame = Some(Instant::now());
 					raytracer.paint(painter.gl(), uniforms);
+
+					let ft = Instant::now() - raytracer.last_frame.unwrap();
+					raytracer.last_frametime = Some(ft);
+
+					raytracer.camera.resize(scr_size);
+					raytracer.camera.update(ft);
+
 					raytracer.frame_index += 1;
 				},
 			)),
@@ -28,8 +42,13 @@ impl RaytracingApp {
 pub struct Raytracer {
 	program: glow::Program,
 	verts: glow::VertexArray,
+
+	camera: Camera,
 	spheres: Spheres,
+
 	frame_index: u32,
+	last_frame: Option<Instant>,
+	pub last_frametime: Option<web_time::Duration>,
 }
 
 impl Raytracer {
@@ -85,11 +104,17 @@ impl Raytracer {
 			Self {
 				program,
 				verts,
+
+				// [1.0, 1.0] is temporary. we update the actual size in paint callback
+				camera: Camera::new(70.0_f32.to_radians(), [1.0, 1.0]),
 				spheres: Spheres {
 					radii: Box::new([0.5, 0.3]),
 					pos: Box::new([0.0, 0.0, -0.4, 0.4, 0.0, 0.0]),
 				},
+
 				frame_index: 0,
+				last_frame: None,
+				last_frametime: None,
 			}
 		}
 	}
@@ -107,6 +132,9 @@ impl Raytracer {
 			self.apply_uniforms(gl, uniforms);
 			gl.bind_vertex_array(Some(self.verts));
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
+			// block until the rendering finishes, allowing CPU-side timing
+			gl.finish();
 		}
 	}
 
@@ -144,7 +172,8 @@ impl Raytracer {
 			);
 
 			gl.uniform_1_u32(
-				gl.get_uniform_location(self.program, "frame_index").as_ref(),
+				gl.get_uniform_location(self.program, "frame_index")
+					.as_ref(),
 				self.frame_index,
 			);
 
@@ -161,15 +190,8 @@ impl Raytracer {
 			);
 
 			gl.uniform_3_f32_slice(
-				gl.get_uniform_location(self.program, "sphere_pos")
-					.as_ref(),
+				gl.get_uniform_location(self.program, "sphere_pos").as_ref(),
 				&self.spheres.pos,
-			);
-
-			// DEBUG
-			gl.uniform_1_f32(
-				gl.get_uniform_location(self.program, "sphere_x").as_ref(),
-				uniforms.sphere_x,
 			);
 		}
 	}
