@@ -65,14 +65,7 @@ vec3 rand_in_unit_sphere(inout uint seed) {
 vec3 current_ray_dir() {
 	vec2 coord = gl_FragCoord.xy / scr_size * 2.0 - 1.0;
 	vec4 target = camera_inv_proj * vec4(coord.xy, 1, 1);
-	return vec3(
-		camera_inv_view * vec4(
-			normalize(
-				vec3(target) / target.w
-			),
-			0
-		)
-	);
+	return vec3(camera_inv_view * vec4(normalize(vec3(target) / target.w), 0));
 }
 
 RayHit ray_sphere_intersection(Ray ray, Sphere sphere) {

@@ -106,8 +106,6 @@ impl Camera {
 
 			self.forward_dir = nalgebra_glm::quat_rotate_vec3(&q, &self.forward_dir);
 
-			// log::log!(log::Level::Info, "{}", self.forward_dir);
-
 			moved = true;
 		}
 
