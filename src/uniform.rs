@@ -11,9 +11,12 @@ pub struct Uniforms {
 }
 
 impl Uniforms {
-	pub fn new(settings: &crate::settings::Settings, scr_size: [f32; 2]) -> Self {
+	pub fn new(
+		settings: &crate::settings::Settings,
+		scr_size: egui::Vec2,
+	) -> Self {
 		Uniforms {
-			scr_size,
+			scr_size: scr_size.into(),
 
 			sky_color: settings.sky.background_color,
 			sun_dir: {

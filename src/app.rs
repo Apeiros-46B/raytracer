@@ -46,10 +46,10 @@ impl eframe::App for RaytracingApp {
 	// }
 
 	fn update(&mut self, egui: &egui::Context, _frame: &mut eframe::Frame) {
-		self.settings.window(egui, self.renderer.lock().last_frametime);
+		let focused = self.settings.window(egui);
 
 		egui::CentralPanel::default().show(egui, |ui| {
-			self.paint(ui);
+			self.paint(ui, focused);
 		});
 
 		egui.request_repaint_of(egui.viewport_id());

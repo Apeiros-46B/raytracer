@@ -7,7 +7,6 @@ use egui::Slider;
 pub struct Settings {
 	pub sky: SkySettings,
 	pub render: RenderSettings,
-	// pub camera: Camera,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -27,8 +26,8 @@ impl Default for SkySettings {
 			sun_size: 1.0,
 			sun_warmth: 5200.0,
 			sun_strength: 1.0,
-			sun_rotation: PI / 4.0,
-			sun_elevation: PI / 4.0,
+			sun_rotation: 45.0_f32.to_radians(),
+			sun_elevation: 45.0_f32.to_radians(),
 			background_color: [0.0, 0.0, 0.0],
 		}
 	}
@@ -37,6 +36,7 @@ impl Default for SkySettings {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct RenderSettings {
+	pub fov: f32,
 	pub gizmos: bool,
 	pub denoise: bool,
 	pub max_bounces: u32,
@@ -46,6 +46,7 @@ pub struct RenderSettings {
 impl Default for RenderSettings {
 	fn default() -> Self {
 		Self {
+			fov: 80.0_f32.to_radians(),
 			gizmos: true,
 			denoise: true,
 			max_bounces: 5,
@@ -78,48 +79,51 @@ impl Default for RenderSettings {
 // }
 
 impl Settings {
-	pub fn window(
-		&mut self,
-		egui: &egui::Context,
-		frametime: Option<web_time::Duration>,
-	) {
+	// return: whether or not typing widgets are focused
+	pub fn window(&mut self, egui: &egui::Context) -> bool {
+		let mut focused = false;
+
 		egui::Window::new("Settings").show(egui, |ui| {
-			if let Some(frametime) = frametime {
-				let ms = frametime.as_millis();
-				let fps = if ms != 0 {
-					1000 / ms
-				} else {
-					0
-				};
-				ui.label(format!("Frametime: {:#?} ({fps} FPS)", frametime));
-			}
+			let frametime = ui.input(|i| i.unstable_dt);
+			ui.label(format!(
+				"Frametime: {}ms ({} FPS)",
+				(frametime * 1000.0),
+				(1.0 / frametime).round(),
+			));
 
 			ui.collapsing("World settings", |ui| {
 				ui.horizontal(|ui| {
 					ui.label("Background color:");
-					ui.color_edit_button_rgb(&mut self.sky.background_color);
+					focused |= ui
+						.color_edit_button_rgb(&mut self.sky.background_color)
+						.has_focus();
 				});
 
 				ui.horizontal(|ui| {
 					ui.label("Sun warmth:");
-					ui.add(
-						Slider::new(&mut self.sky.sun_warmth, 1200.0..=12000.0).suffix("K"),
-					);
+					focused |= ui
+						.add(
+							Slider::new(&mut self.sky.sun_warmth, 1200.0..=12000.0)
+								.suffix("K"),
+						)
+						.has_focus();
 				});
 
 				ui.horizontal(|ui| {
 					ui.label("Sun strength:");
-					ui.add(Slider::new(&mut self.sky.sun_strength, 0.0..=10.0));
+					focused |= ui
+						.add(Slider::new(&mut self.sky.sun_strength, 0.0..=10.0))
+						.has_focus();
 				});
 
 				ui.horizontal(|ui| {
 					ui.label("Sun elevation:");
-					ui.drag_angle(&mut self.sky.sun_elevation);
+					focused |= ui.drag_angle(&mut self.sky.sun_elevation).has_focus();
 				});
 
 				ui.horizontal(|ui| {
 					ui.label("Sun rotation:");
-					ui.drag_angle(&mut self.sky.sun_rotation);
+					focused |= ui.drag_angle(&mut self.sky.sun_rotation).has_focus();
 				});
 			});
 
@@ -129,9 +133,28 @@ impl Settings {
 
 				ui.horizontal(|ui| {
 					ui.label("Max ray bounces:");
-					ui.add(Slider::new(&mut self.render.max_bounces, 1..=10));
+					focused |= ui
+						.add(Slider::new(&mut self.render.max_bounces, 1..=10))
+						.has_focus();
+				});
+
+				ui.horizontal(|ui| {
+					ui.label("Field of view:");
+					focused |= ui
+						.add(
+							Slider::new(
+								&mut self.render.fov,
+								(50.0_f32.to_radians())..=(120.0_f32.to_radians()),
+							)
+							.suffix("°")
+							.custom_formatter(|n, _| n.to_degrees().round().to_string())
+							.custom_parser(|s| s.parse().map(|n: f64| n.to_radians()).ok()),
+						)
+						.has_focus();
 				});
 			});
 		});
+
+		focused
 	}
 }

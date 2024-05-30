@@ -1,5 +1,3 @@
-use web_time::Instant;
-
 use eframe::{
 	egui_glow,
 	glow::{self, Context, HasContext},
@@ -10,28 +8,34 @@ use crate::{
 };
 
 impl RaytracingApp {
-	pub fn paint(&mut self, ui: &mut egui::Ui) {
+	pub fn paint(&mut self, ui: &mut egui::Ui, text_focused: bool) {
 		let scr = ui.clip_rect();
-		let scr_size: [f32; 2] = scr.size().into();
-		let uniforms = Uniforms::new(&self.settings, scr_size);
+		let scr_size = scr.size();
 
+		let fov = self.settings.render.fov;
 		let renderer = self.renderer.clone();
+
+		// TODO: remove the whole uniforms struct and just let apply_uniforms take
+		// a clone of settings
+		let uniforms = Uniforms::new(&self.settings, scr_size);
+		let input = ui.input(|i| i.clone());
+
 		let callback = egui::PaintCallback {
 			rect: scr,
 			callback: std::sync::Arc::new(egui_glow::CallbackFn::new(
 				move |_, painter| {
 					let mut raytracer = renderer.lock();
 
-					raytracer.last_frame = Some(Instant::now());
 					raytracer.paint(painter.gl(), uniforms);
-
-					let ft = Instant::now() - raytracer.last_frame.unwrap();
-					raytracer.last_frametime = Some(ft);
-
-					raytracer.camera.resize(scr_size);
-					raytracer.camera.update(ft);
-
 					raytracer.frame_index += 1;
+
+					raytracer.camera.set_fov(fov);
+					raytracer.camera.set_scr_size(scr_size.into());
+					// reset frame index if moved
+					// don't respond to keypresses if text is focused
+					if !text_focused && raytracer.camera.update(input.clone()) {
+						raytracer.frame_index = 0;
+					};
 				},
 			)),
 		};
@@ -47,8 +51,6 @@ pub struct Raytracer {
 	spheres: Spheres,
 
 	frame_index: u32,
-	last_frame: Option<Instant>,
-	pub last_frametime: Option<web_time::Duration>,
 }
 
 impl Raytracer {
@@ -113,8 +115,6 @@ impl Raytracer {
 				},
 
 				frame_index: 0,
-				last_frame: None,
-				last_frametime: None,
 			}
 		}
 	}
@@ -146,6 +146,13 @@ impl Raytracer {
 				uniforms.scr_size[1],
 			);
 
+			gl.uniform_1_u32(
+				gl.get_uniform_location(self.program, "frame_index")
+					.as_ref(),
+				self.frame_index,
+			);
+
+			// {{{ sky colors
 			gl.uniform_3_f32(
 				gl.get_uniform_location(self.program, "sky_color").as_ref(),
 				uniforms.sky_color[0],
@@ -165,18 +172,14 @@ impl Raytracer {
 					.as_ref(),
 				uniforms.sun_strength,
 			);
+			// }}}
 
 			gl.uniform_1_u32(
 				gl.get_uniform_location(self.program, "bounces").as_ref(),
 				uniforms.max_bounces,
 			);
 
-			gl.uniform_1_u32(
-				gl.get_uniform_location(self.program, "frame_index")
-					.as_ref(),
-				self.frame_index,
-			);
-
+			// {{{ sphere
 			gl.uniform_1_u32(
 				gl.get_uniform_location(self.program, "sphere_count")
 					.as_ref(),
@@ -193,6 +196,30 @@ impl Raytracer {
 				gl.get_uniform_location(self.program, "sphere_pos").as_ref(),
 				&self.spheres.pos,
 			);
+			// }}}
+
+			// {{{ camera
+			gl.uniform_3_f32(
+				gl.get_uniform_location(self.program, "camera_pos").as_ref(),
+				self.camera.pos.x,
+				self.camera.pos.y,
+				self.camera.pos.z,
+			);
+
+			gl.uniform_matrix_4_f32_slice(
+				gl.get_uniform_location(self.program, "camera_inv_proj")
+					.as_ref(),
+				false, // no transpose, it's already in column-major order
+				self.camera.inv_proj.as_slice(),
+			);
+
+			gl.uniform_matrix_4_f32_slice(
+				gl.get_uniform_location(self.program, "camera_inv_view")
+					.as_ref(),
+				false, // no transpose, it's already in column-major order
+				self.camera.inv_view.as_slice(),
+			);
+			// }}}
 		}
 	}
 }
