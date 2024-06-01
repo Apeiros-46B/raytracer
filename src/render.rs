@@ -110,8 +110,10 @@ impl Raytracer {
 				// [1.0, 1.0] is temporary. we update the actual size in paint callback
 				camera: Camera::new(70.0_f32.to_radians(), [1.0, 1.0]),
 				spheres: Spheres {
-					radii: Box::new([0.5, 0.3]),
-					pos: Box::new([0.0, -0.4, 0.0, 0.0, 0.4, 0.0]),
+					// radii: Box::new([0.5, 0.3]),
+					// pos: Box::new([0.0, -0.4, 0.0, 0.0, 0.4, 0.0]),
+					radii: Box::new([0.5]),
+					pos: Box::new([0.0, 0.0, 0.0]),
 				},
 
 				frame_index: 0,
