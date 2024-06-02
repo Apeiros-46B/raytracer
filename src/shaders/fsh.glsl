@@ -1,4 +1,6 @@
+// vim:commentstring=//%s
 precision mediump float;
+precision mediump usampler2D;
 
 const int MAX_SPHERES = 50;
 
@@ -36,6 +38,8 @@ uniform vec3 camera_pos;
 uniform mat4 camera_inv_proj;
 uniform mat4 camera_inv_view;
 
+uniform usampler2D ray_directions;
+
 // 0x7f7f_fff = 0b0_11111110_11111111111111111111111 = 2139095039
 const float max_float = intBitsToFloat(2139095039);
 
@@ -56,16 +60,9 @@ vec3 rand_in_unit_sphere(inout uint seed) {
 	));
 }
 
-// vec2 current_pixel() {
-//   vec2 pos = gl_FragCoord.xy / scr_size * 2.0 - 1.0;
-//   pos.x *= scr_size.x / scr_size.y;
-//   return pos * 0.5; // less harsh angle
-// }
-
 vec3 current_ray_dir() {
-	vec2 coord = gl_FragCoord.xy / scr_size * 2.0 - 1.0;
-	vec4 target = camera_inv_proj * vec4(coord.xy, 1, 1);
-	return vec3(camera_inv_view * vec4(normalize(vec3(target) / target.w), 0));
+	uvec3 texel = texture(ray_directions, gl_FragCoord.xy / scr_size).rgb;
+	return vec3(uintBitsToFloat(texel));
 }
 
 RayHit ray_sphere_intersection(Ray ray, Sphere sphere) {
@@ -78,7 +75,8 @@ RayHit ray_sphere_intersection(Ray ray, Sphere sphere) {
 	float discriminant = b * b - 4.0 * a * c;
 
 	if (discriminant >= 0.0) {
-		return RayHit(true, (-b - sqrt(discriminant)) / (2.0 * a));
+		float t = (-b - sqrt(discriminant)) / (2.0 * a);
+		return RayHit(t >= 0.0, t);
 	} else {
 		return RayHit(false, 0.0);
 	}

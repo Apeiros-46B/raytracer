@@ -1,5 +1,3 @@
-use std::f32::consts::PI;
-
 use egui::Slider;
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -7,6 +5,9 @@ use egui::Slider;
 pub struct Settings {
 	pub sky: SkySettings,
 	pub render: RenderSettings,
+
+	#[serde(skip)]
+	data_confirmation: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -55,29 +56,6 @@ impl Default for RenderSettings {
 	}
 }
 
-// #[derive(serde::Deserialize, serde::Serialize)]
-// #[serde(default)]
-// pub struct Camera {
-// 	proj: [f32; 16],
-// 	inverse_proj: [f32; 16],
-// 	view: [f32; 16],
-// 	inverse_view: [f32; 16],
-// }
-
-// impl Default for Camera {
-// 	fn default() -> Self {
-// 		Self::new(80.0, near_clip, far_clip)
-// 	}
-// }
-
-// impl Camera {
-// 	fn new(v_fov: f32, near_clip: f32, far_clip: f32) -> Self {
-// 		Self {
-
-// 		}
-// 	}
-// }
-
 impl Settings {
 	// return: whether or not typing widgets are focused
 	pub fn window(&mut self, egui: &egui::Context) -> bool {
@@ -91,6 +69,7 @@ impl Settings {
 				(1.0 / frametime).round(),
 			));
 
+			// {{{ world settings
 			ui.collapsing("World settings", |ui| {
 				ui.horizontal(|ui| {
 					ui.label("Background color:");
@@ -126,7 +105,9 @@ impl Settings {
 					focused |= ui.drag_angle(&mut self.sky.sun_rotation).has_focus();
 				});
 			});
+			// }}}
 
+			// {{{ render settings
 			ui.collapsing("Render settings", |ui| {
 				ui.checkbox(&mut self.render.gizmos, "Show gizmos");
 				ui.checkbox(&mut self.render.denoise, "Denoising");
@@ -153,6 +134,35 @@ impl Settings {
 						.has_focus();
 				});
 			});
+			// }}}
+
+			if ui.button("Clear all data").clicked() {
+				self.data_confirmation = true;
+			}
+
+			if self.data_confirmation {
+				egui::Window::new("Clear all data?")
+					.collapsible(false)
+					.resizable(false)
+					.anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+					.show(egui, |ui| {
+						ui.label("This will delete:");
+						ui.label("- Scene objects and associated materials");
+						ui.label("- Camera parameters");
+						ui.label("- Saved settings");
+
+						ui.horizontal(|ui| {
+							if ui.button("Cancel").highlight().clicked() {
+								self.data_confirmation = false;
+							}
+
+							if ui.button("Confirm").clicked() {
+								self.data_confirmation = false;
+								// something
+							}
+						})
+					});
+			}
 		});
 
 		focused

@@ -13,7 +13,8 @@
 // 	pos: [f32; 3],
 // }
 
-pub struct Spheres {
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Scene {
 	pub radii: Box<[f32]>,
 	pub pos: Box<[f32]>, // 3 times the length
 }

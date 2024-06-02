@@ -1,8 +1,11 @@
 use egui::Key;
-use nalgebra_glm::{
-	inverse, look_at, perspective_fov, quat_angle_axis, Mat4, Vec2, Vec3,
+use glm::{
+	inverse, look_at, perspective_fov, quat_angle_axis, Mat4,
+	Vec2, Vec3,
 };
+use nalgebra_glm as glm;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Camera {
 	vertical_fov: f32,
 	near_clip: f32,
@@ -17,19 +20,24 @@ pub struct Camera {
 	pub inv_view: Mat4,
 
 	scr_size: Vec2,
+	pub recalculate_ray_dirs: bool, // actual calculation is offloaded
+	pub ray_dirs: Vec<[f32; 3]>,
 }
 
 const UP_DIR: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const BASE_SPEED: f32 = 5.0;
 const BASE_ROT_SPEED: f32 = 0.005;
 
+const DEFAULT_POS: Vec3 = Vec3::new(0.0, 0.0, 2.0);
+const DEFAULT_FORWARD_DIR: Vec3 = Vec3::new(0.0, 0.0, -1.0);
+
 impl Camera {
-	pub fn new(vertical_fov: f32, scr_size: [f32; 2]) -> Self {
+	pub fn new(vertical_fov: f32, scr_size: Vec2) -> Self {
 		let near_clip = 0.1;
 		let far_clip = 100.0;
 
-		let pos: Vec3 = [0.0, 0.0, 3.0].into();
-		let forward_dir: Vec3 = [0.0, 0.0, -1.0].into();
+		let pos = DEFAULT_POS;
+		let forward_dir = DEFAULT_FORWARD_DIR;
 
 		let proj = perspective_fov(
 			vertical_fov,
@@ -53,15 +61,24 @@ impl Camera {
 			view,
 			inv_view: inverse(&view),
 
-			scr_size: scr_size.into(),
+			scr_size,
+			recalculate_ray_dirs: false,
+			ray_dirs: Vec::with_capacity((scr_size.x * scr_size.y) as usize),
 		}
 	}
 
 	// return: whether the camera moved
 	pub fn update(&mut self, input: egui::InputState) -> bool {
+		if input.key_pressed(Key::R) {
+			self.pos = DEFAULT_POS;
+			self.forward_dir = DEFAULT_FORWARD_DIR;
+			self.recalc_view();
+			return true;
+		}
+
 		let mut moved = false;
 		let dt = input.unstable_dt;
-		let right_dir = nalgebra_glm::cross(&self.forward_dir, &UP_DIR);
+		let right_dir = glm::cross(&self.forward_dir, &UP_DIR);
 
 		let mut speed = BASE_SPEED;
 		let mut rot_speed = BASE_ROT_SPEED;
@@ -73,7 +90,6 @@ impl Camera {
 
 		if input.key_down(Key::W) {
 			self.pos += self.forward_dir * speed * dt;
-			log::log!(log::Level::Info, "W");
 			moved = true;
 		} else if input.key_down(Key::S) {
 			self.pos -= self.forward_dir * speed * dt;
@@ -99,12 +115,12 @@ impl Camera {
 		if input.pointer.secondary_down() && input.pointer.is_moving() {
 			let delta = input.pointer.delta() * rot_speed;
 
-			let q = nalgebra_glm::quat_normalize(&nalgebra_glm::quat_cross(
+			let q = glm::quat_normalize(&glm::quat_cross(
 				&quat_angle_axis(-delta.y, &right_dir),
 				&quat_angle_axis(-delta.x, &UP_DIR),
 			));
 
-			self.forward_dir = nalgebra_glm::quat_rotate_vec3(&q, &self.forward_dir);
+			self.forward_dir = glm::quat_rotate_vec3(&q, &self.forward_dir);
 
 			moved = true;
 		}
@@ -125,13 +141,9 @@ impl Camera {
 		self.recalc_proj();
 	}
 
-	pub fn set_scr_size(&mut self, new_scr_size: [f32; 2]) {
-		let new_scr_size: Vec2 = new_scr_size.into();
-
-		if new_scr_size == self.scr_size {
-			return;
-		}
-
+	pub fn set_scr_size(&mut self, new_scr_size: Vec2) {
+		// no check with existing scr_size is needed because this is done
+		// in the raytracer struct on resize (this logic is also needed there)
 		self.scr_size = new_scr_size;
 		self.recalc_proj();
 	}
@@ -145,12 +157,12 @@ impl Camera {
 			self.far_clip,
 		);
 		self.inv_proj = inverse(&self.proj);
+		self.recalculate_ray_dirs = true;
 	}
 
 	fn recalc_view(&mut self) {
 		self.view = look_at(&self.pos, &(self.pos + self.forward_dir), &UP_DIR);
 		self.inv_view = inverse(&self.view);
+		self.recalculate_ray_dirs = true;
 	}
-
-	// ray directions recalculation is done on the GPU
 }

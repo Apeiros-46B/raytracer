@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-// use eframe::glow::HasContext;
+use eframe::glow::HasContext;
 use egui::mutex::Mutex;
+use nalgebra_glm as glm;
 
 use crate::{render::Raytracer, settings::Settings};
 
@@ -33,8 +34,22 @@ impl RaytracingApp {
 			..Default::default()
 		});
 
+		let scr_size = cc.egui_ctx.screen_rect().size();
+		let scr_size = glm::vec2(scr_size.x, scr_size.y);
+
 		Self {
-			renderer: Arc::new(Mutex::new(Raytracer::new(gl))),
+			renderer: Arc::new(Mutex::new(Raytracer::new(
+				gl,
+				crate::camera::Camera::new(
+					70.0_f32.to_radians(),
+					scr_size,
+				),
+				crate::scene::Scene {
+					radii: Box::new([1.0]),
+					pos: Box::new([0.0, 0.0, 0.0]),
+				},
+				scr_size,
+			))),
 			settings,
 		}
 	}
