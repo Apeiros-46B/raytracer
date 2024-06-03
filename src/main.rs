@@ -15,12 +15,12 @@ fn main() -> eframe::Result<()> {
 				eframe::icon_data::from_png_bytes(
 					&include_bytes!("../assets/icon-256.png")[..],
 				)
-				.expect("failed to load icon"),
+				.expect("loading icon failed"),
 			),
 		..Default::default()
 	};
 	eframe::run_native(
-		"eframe template",
+		"Raytracer",
 		native_options,
 		Box::new(|cc| Box::new(RaytracingApp::new(cc))),
 	)
@@ -40,6 +40,6 @@ fn main() {
 				Box::new(|cc| Box::new(RaytracingApp::new(cc))),
 			)
 			.await
-			.expect("failed to start eframe");
+			.expect("starting eframe failed");
 	});
 }

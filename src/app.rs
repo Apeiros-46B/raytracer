@@ -3,26 +3,52 @@ use std::sync::Arc;
 use egui::mutex::Mutex;
 use nalgebra_glm as glm;
 
-use crate::{render::Raytracer, settings::Settings};
+use crate::{
+	camera::Camera, render::Raytracer, scene::Scene, settings::Settings,
+};
 
 pub struct RaytracingApp {
 	pub renderer: Arc<Mutex<Raytracer>>,
+	pub data: Arc<Mutex<PersistentData>>,
+	pub default_data: PersistentData,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct PersistentData {
 	pub settings: Settings,
+	pub camera: Camera,
+	pub scene: Scene,
+}
+
+const DATA_KEY: &str = "raytracer_data";
+
+impl PersistentData {
+	fn new(scr_size: glm::Vec2) -> Self {
+		Self {
+			settings: Settings::default(),
+			camera: Camera::new(scr_size),
+			scene: Scene::default(),
+		}
+	}
 }
 
 impl RaytracingApp {
 	pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-		let mut settings = Settings::default();
+		let scr_size = cc.egui_ctx.screen_rect().size();
+		let scr_size = glm::vec2(scr_size.x, scr_size.y);
+
+		let mut data = PersistentData::new(scr_size);
+		let default_data = data.clone();
 
 		if let Some(storage) = cc.storage {
-			if let Some(value) = eframe::get_value(storage, "settings") {
-				settings = value;
+			if let Some(value) = eframe::get_value(storage, DATA_KEY) {
+				data = value;
 			}
 		}
 
-		let gl = cc.gl.as_ref().expect("failed to obtain GL context");
+		let gl = cc.gl.as_ref().expect("obtaining GL context failed");
 
-		// remove comically large window shadow
+		// reduce window shadow size
 		cc.egui_ctx.set_visuals(egui::Visuals {
 			window_shadow: egui::epaint::Shadow {
 				offset: egui::Vec2::splat(0.0),
@@ -33,34 +59,39 @@ impl RaytracingApp {
 			..Default::default()
 		});
 
-		let scr_size = cc.egui_ctx.screen_rect().size();
-		let scr_size = glm::vec2(scr_size.x, scr_size.y);
-
 		Self {
 			renderer: Arc::new(Mutex::new(Raytracer::new(
 				gl,
-				crate::camera::Camera::new(70.0_f32.to_radians(), scr_size),
-				crate::scene::Scene {
-					radii: Box::new([1.0]),
-					pos: Box::new([0.0, 0.0, 0.0]),
-				},
+				&data.camera, // needed to initialize ray directions texture
 				scr_size,
 			))),
-			settings,
+			data: Arc::new(Mutex::new(data)),
+			default_data,
 		}
 	}
 }
 
 impl eframe::App for RaytracingApp {
-	// fn save(&mut self, storage: &mut dyn eframe::Storage) {
-	// 	eframe::set_value(storage, eframe::APP_KEY, self);
-	// }
+	fn save(&mut self, storage: &mut dyn eframe::Storage) {
+		eframe::set_value(storage, DATA_KEY, &*self.data.lock());
+	}
 
 	fn update(&mut self, egui: &egui::Context, _frame: &mut eframe::Frame) {
-		let settings_response = self.settings.window(egui);
+		let mut data = self.data.lock();
+
+		let frame_index = self.renderer.lock().frame_index;
+		let settings_response = data.settings.window(egui, frame_index);
+
+		if settings_response.clear_data {
+			*data = self.default_data.clone();
+		}
+
+		data.scene.window(egui);
+
+		drop(data);
 
 		egui::CentralPanel::default().show(egui, |ui| {
-			self.paint(ui, settings_response.focused);
+			self.paint(ui, settings_response);
 		});
 
 		egui.request_repaint_of(egui.viewport_id());

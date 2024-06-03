@@ -1,11 +1,10 @@
 use egui::Key;
 use glm::{
-	inverse, look_at, perspective_fov, quat_angle_axis, Mat4,
-	Vec2, Vec3,
+	inverse, look_at, perspective_fov, quat_angle_axis, Mat4, Vec2, Vec3,
 };
 use nalgebra_glm as glm;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Camera {
 	vertical_fov: f32,
 	near_clip: f32,
@@ -21,7 +20,6 @@ pub struct Camera {
 
 	scr_size: Vec2,
 	pub recalculate_ray_dirs: bool, // actual calculation is offloaded
-	pub ray_dirs: Vec<[f32; 3]>,
 }
 
 const UP_DIR: Vec3 = Vec3::new(0.0, 1.0, 0.0);
@@ -31,8 +29,11 @@ const BASE_ROT_SPEED: f32 = 0.005;
 const DEFAULT_POS: Vec3 = Vec3::new(0.0, 0.0, 2.0);
 const DEFAULT_FORWARD_DIR: Vec3 = Vec3::new(0.0, 0.0, -1.0);
 
+pub const DEFAULT_FOV_DEG: f32 = 70.0_f32;
+
 impl Camera {
-	pub fn new(vertical_fov: f32, scr_size: Vec2) -> Self {
+	pub fn new(scr_size: Vec2) -> Self {
+		let vertical_fov = DEFAULT_FOV_DEG.to_radians();
 		let near_clip = 0.1;
 		let far_clip = 100.0;
 
@@ -63,7 +64,6 @@ impl Camera {
 
 			scr_size,
 			recalculate_ray_dirs: false,
-			ray_dirs: Vec::with_capacity((scr_size.x * scr_size.y) as usize),
 		}
 	}
 

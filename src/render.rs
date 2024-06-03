@@ -5,48 +5,9 @@ use eframe::{
 use nalgebra_glm as glm;
 
 use crate::{
-	app::RaytracingApp, camera::Camera, scene::Scene, settings::Settings,
+	app::{PersistentData, RaytracingApp},
+	camera::Camera,
 };
-
-impl RaytracingApp {
-	pub fn paint(&mut self, ui: &mut egui::Ui, text_focused: bool) {
-		let scr = ui.clip_rect();
-		let scr_size = scr.size();
-
-		let fov = self.settings.render.fov;
-		let renderer = self.renderer.clone();
-
-		let settings = self.settings.clone();
-		let input_state = ui.input(|i| i.clone());
-
-		let callback = egui::PaintCallback {
-			rect: scr,
-			callback: std::sync::Arc::new(egui_glow::CallbackFn::new(
-				move |_, painter| {
-					let mut raytracer = renderer.lock();
-					let gl = painter.gl();
-
-					raytracer.set_scr_size(gl, glm::vec2(scr_size.x, scr_size.y));
-					raytracer.paint(gl, settings.clone());
-					raytracer.frame_index += 1;
-
-					// update camera
-					raytracer.camera.set_fov(fov);
-					// don't respond to keypresses if text is focused
-					if !text_focused && raytracer.camera.update(input_state.clone()) {
-						// reset frame index if moved
-						raytracer.frame_index = 0;
-					};
-					if raytracer.camera.recalculate_ray_dirs {
-						raytracer.calculate_ray_directions(gl);
-						raytracer.camera.recalculate_ray_dirs = false;
-					}
-				},
-			)),
-		};
-		ui.painter().add(callback);
-	}
-}
 
 pub struct Raytracer {
 	// prepass calculates ray directions for each pixel when the screen size changes
@@ -57,11 +18,8 @@ pub struct Raytracer {
 	program: Program,
 	verts: VertexArray,
 
-	frame_index: u32,
 	scr_size: glm::Vec2,
-
-	camera: Camera,
-	scene: Scene,
+	pub frame_index: u32,
 }
 
 // {{{ shader compilation boilerplate
@@ -118,13 +76,58 @@ unsafe fn compile_shaders(
 }
 // }}}
 
+impl RaytracingApp {
+	pub fn paint(
+		&mut self,
+		ui: &mut egui::Ui,
+		settings_response: crate::settings::SettingsResponse,
+	) {
+		let scr = ui.clip_rect();
+		let scr_size = scr.size();
+		let raytracer_mutex = self.renderer.clone();
+		let data_mutex = self.data.clone();
+		let input = ui.input(|i| i.clone());
+
+		// {{{ paint callback
+		let callback = egui::PaintCallback {
+			rect: scr,
+			callback: std::sync::Arc::new(egui_glow::CallbackFn::new(
+				move |_, painter| {
+					let mut raytracer = raytracer_mutex.lock();
+					let mut data = data_mutex.lock();
+
+					let gl = painter.gl();
+
+					raytracer.set_scr_size(
+						gl,
+						&mut data.camera,
+						glm::vec2(scr_size.x, scr_size.y),
+					);
+					raytracer.paint(gl, &data);
+					raytracer.frame_index += 1;
+
+					// update camera
+					let fov = data.settings.render.fov;
+					data.camera.set_fov(fov);
+					if !settings_response.focused && data.camera.update(input.clone()) {
+						// don't respond to keypresses if text is focused
+						// reset frame index if moved
+						raytracer.frame_index = 0;
+					};
+					if data.camera.recalculate_ray_dirs {
+						raytracer.calculate_ray_directions(gl, &data.camera);
+						data.camera.recalculate_ray_dirs = false;
+					}
+				},
+			)),
+		};
+		ui.painter().add(callback);
+		// }}}
+	}
+}
+
 impl Raytracer {
-	pub fn new(
-		gl: &Context,
-		camera: Camera,
-		scene: Scene,
-		scr_size: glm::Vec2,
-	) -> Self {
+	pub fn new(gl: &Context, camera: &Camera, scr_size: glm::Vec2) -> Self {
 		unsafe {
 			// {{{ create shader programs
 			let prepass_program = gl.create_program().expect("create program failed");
@@ -197,17 +200,16 @@ impl Raytracer {
 				program,
 				verts,
 
-				frame_index: 0,
 				scr_size,
-
-				camera,
-				scene,
+				frame_index: 0,
 			};
-			this.calculate_ray_directions(gl);
+			// initial ray direction calculation
+			this.calculate_ray_directions(gl, camera);
 			this
 		}
 	}
 
+	// {{{ clean up GL objects
 	pub fn destroy(&self, gl: &Context) {
 		unsafe {
 			gl.delete_framebuffer(self.prepass_fbo);
@@ -219,27 +221,35 @@ impl Raytracer {
 			gl.delete_vertex_array(self.verts);
 		}
 	}
+	// }}}
 
-	pub fn paint(&mut self, gl: &Context, settings: Settings) {
+	// {{{ call on every frame to render
+	pub fn paint(&mut self, gl: &Context, data: &PersistentData) {
 		unsafe {
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 			gl.use_program(Some(self.program));
-			self.apply_uniforms(gl, settings);
+			self.apply_uniforms(gl, data);
 			gl.bind_texture(glow::TEXTURE_2D, Some(self.prepass_texture));
 			gl.bind_vertex_array(Some(self.verts));
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
 			gl.bind_texture(glow::TEXTURE_2D, None);
 		}
 	}
+	// }}}
 
 	// {{{ set screen size
-	fn set_scr_size(&mut self, gl: &Context, new_scr_size: glm::Vec2) {
+	fn set_scr_size(
+		&mut self,
+		gl: &Context,
+		camera: &mut Camera,
+		new_scr_size: glm::Vec2,
+	) {
 		if self.scr_size == new_scr_size {
 			return;
 		}
 
 		self.scr_size = new_scr_size;
-		self.camera.set_scr_size(new_scr_size);
+		camera.set_scr_size(new_scr_size);
 
 		unsafe {
 			// resize ray directions texture
@@ -261,7 +271,7 @@ impl Raytracer {
 	// }}}
 
 	// {{{ calculate ray directions
-	fn calculate_ray_directions(&mut self, gl: &Context) {
+	fn calculate_ray_directions(&mut self, gl: &Context, camera: &Camera) {
 		unsafe {
 			gl.use_program(Some(self.prepass_program));
 
@@ -275,13 +285,13 @@ impl Raytracer {
 				gl.get_uniform_location(self.prepass_program, "inv_proj")
 					.as_ref(),
 				false, // no transpose, it's already in column-major order
-				self.camera.inv_proj.as_slice(),
+				camera.inv_proj.as_slice(),
 			);
 			gl.uniform_matrix_4_f32_slice(
 				gl.get_uniform_location(self.prepass_program, "inv_view")
 					.as_ref(),
 				false, // no transpose, it's already in column-major order
-				self.camera.inv_view.as_slice(),
+				camera.inv_view.as_slice(),
 			);
 
 			gl.bind_vertex_array(Some(self.prepass_verts));
@@ -298,12 +308,21 @@ impl Raytracer {
 	}
 	// }}}
 
-	fn apply_uniforms(&mut self, gl: &Context, settings: Settings) {
+	// apply uniforms to main program
+	fn apply_uniforms(&mut self, gl: &Context, data: &PersistentData) {
 		unsafe {
+			// {{{ state
 			gl.uniform_2_f32(
 				gl.get_uniform_location(self.program, "scr_size").as_ref(),
 				self.scr_size.x,
 				self.scr_size.y,
+			);
+
+			gl.uniform_3_f32(
+				gl.get_uniform_location(self.program, "camera_pos").as_ref(),
+				data.camera.pos.x,
+				data.camera.pos.y,
+				data.camera.pos.z,
 			);
 
 			gl.uniform_1_u32(
@@ -311,21 +330,41 @@ impl Raytracer {
 					.as_ref(),
 				self.frame_index,
 			);
+			// }}}
 
-			// {{{ sky settings
+			// {{{ scene
+			gl.uniform_1_u32(
+				gl.get_uniform_location(self.program, "sphere_count")
+					.as_ref(),
+				data.scene.radii.len().try_into().unwrap(),
+			);
+
+			gl.uniform_1_f32_slice(
+				gl.get_uniform_location(self.program, "sphere_radii")
+					.as_ref(),
+				&data.scene.radii,
+			);
+
+			gl.uniform_3_f32_slice(
+				gl.get_uniform_location(self.program, "sphere_pos").as_ref(),
+				&data.scene.pos,
+			);
+			// }}}
+
+			// {{{ world settings
 			// sky color
 			gl.uniform_3_f32(
 				gl.get_uniform_location(self.program, "sky_color").as_ref(),
-				settings.world.sky_color[0],
-				settings.world.sky_color[1],
-				settings.world.sky_color[2],
+				data.settings.world.sky_color[0],
+				data.settings.world.sky_color[1],
+				data.settings.world.sky_color[2],
 			);
 
 			// sun direction
-			let beta_cos = settings.world.sun_elevation.cos();
-			let x = settings.world.sun_rotation.cos() * beta_cos;
-			let y = settings.world.sun_elevation.sin();
-			let z = settings.world.sun_rotation.sin() * beta_cos;
+			let beta_cos = data.settings.world.sun_elevation.cos();
+			let x = data.settings.world.sun_rotation.cos() * beta_cos;
+			let y = data.settings.world.sun_elevation.sin();
+			let z = data.settings.world.sun_rotation.sin() * beta_cos;
 			let mag = (x.powi(2) + y.powi(2) + z.powi(2)).sqrt();
 			gl.uniform_3_f32(
 				gl.get_uniform_location(self.program, "sun_dir").as_ref(),
@@ -338,42 +377,17 @@ impl Raytracer {
 			gl.uniform_1_f32(
 				gl.get_uniform_location(self.program, "sun_strength")
 					.as_ref(),
-				settings.world.sun_strength,
+				data.settings.world.sun_strength,
 			);
 			// }}}
 
+			// {{{ render settings
 			// maximum light bounces
 			gl.uniform_1_u32(
-				gl.get_uniform_location(self.program, "bounces").as_ref(),
-				settings.render.max_bounces,
-			);
-
-			// {{{ sphere
-			gl.uniform_1_u32(
-				gl.get_uniform_location(self.program, "sphere_count")
-					.as_ref(),
-				self.scene.radii.len().try_into().unwrap(),
-			);
-
-			gl.uniform_1_f32_slice(
-				gl.get_uniform_location(self.program, "sphere_radii")
-					.as_ref(),
-				&self.scene.radii,
-			);
-
-			gl.uniform_3_f32_slice(
-				gl.get_uniform_location(self.program, "sphere_pos").as_ref(),
-				&self.scene.pos,
+				gl.get_uniform_location(self.program, "max_bounces").as_ref(),
+				data.settings.render.max_bounces,
 			);
 			// }}}
-
-			// camera position
-			gl.uniform_3_f32(
-				gl.get_uniform_location(self.program, "camera_pos").as_ref(),
-				self.camera.pos.x,
-				self.camera.pos.y,
-				self.camera.pos.z,
-			);
 		}
 	}
 }

@@ -1,4 +1,4 @@
-use egui::Slider;
+use egui::{Color32, Slider};
 
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -42,27 +42,34 @@ pub struct RenderSettings {
 	pub denoise: bool,
 	pub max_bounces: u32,
 	pub render_scale: u32,
+	pub lighting: bool,
 }
 
 impl Default for RenderSettings {
 	fn default() -> Self {
 		Self {
-			fov: 80.0_f32.to_radians(),
+			fov: crate::camera::DEFAULT_FOV_DEG.to_radians(),
 			gizmos: true,
 			denoise: true,
 			max_bounces: 5,
 			render_scale: 1,
+			lighting: false,
 		}
 	}
 }
 
+#[derive(Clone, Copy)]
 pub struct SettingsResponse {
 	pub focused: bool,
 	pub clear_data: bool,
 }
 
 impl Settings {
-	pub fn window(&mut self, egui: &egui::Context) -> SettingsResponse {
+	pub fn window(
+		&mut self,
+		egui: &egui::Context,
+		frame_index: u32,
+	) -> SettingsResponse {
 		let mut focused = false;
 		let mut clear_data = false;
 
@@ -75,6 +82,13 @@ impl Settings {
 					(frametime * 1000.0),
 					(1.0 / frametime).round(),
 				));
+
+				ui.horizontal(|ui| {
+					ui.checkbox(&mut self.render.lighting, "Lighting and shading");
+					if self.render.lighting {
+						ui.label(format!("(sample {frame_index})"));
+					}
+				});
 
 				// {{{ world settings
 				ui.collapsing("World settings", |ui| {
@@ -162,6 +176,14 @@ impl Settings {
 								if ui.button("Cancel").highlight().clicked() {
 									self.data_confirmation = false;
 								}
+
+								// make confirm button red on hover
+								ui.visuals_mut().widgets.hovered.weak_bg_fill =
+									Color32::from_rgb(240, 84, 84);
+								ui.visuals_mut().widgets.hovered.bg_stroke.color =
+									Color32::from_rgb(240, 84, 84);
+								ui.visuals_mut().widgets.hovered.fg_stroke.color =
+									Color32::from_rgb(10, 10, 10);
 
 								if ui.button("Confirm").clicked() {
 									self.data_confirmation = false;
