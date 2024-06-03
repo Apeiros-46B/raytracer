@@ -38,22 +38,22 @@ impl Default for WorldSettings {
 #[serde(default)]
 pub struct RenderSettings {
 	pub fov: f32,
-	pub gizmos: bool,
 	pub denoise: bool,
+	pub lighting: bool,
+	pub lock_camera: bool,
 	pub max_bounces: u32,
 	pub render_scale: u32,
-	pub lighting: bool,
 }
 
 impl Default for RenderSettings {
 	fn default() -> Self {
 		Self {
 			fov: crate::camera::DEFAULT_FOV_DEG.to_radians(),
-			gizmos: true,
 			denoise: true,
+			lighting: false,
+			lock_camera: false,
 			max_bounces: 5,
 			render_scale: 1,
-			lighting: false,
 		}
 	}
 }
@@ -62,6 +62,7 @@ impl Default for RenderSettings {
 pub struct SettingsResponse {
 	pub focused: bool,
 	pub clear_data: bool,
+	pub screenshot: bool,
 }
 
 impl Settings {
@@ -72,23 +73,19 @@ impl Settings {
 	) -> SettingsResponse {
 		let mut focused = false;
 		let mut clear_data = false;
+		let mut screenshot = false;
 
 		egui::Window::new("Settings")
 			.movable(false)
 			.show(egui, |ui| {
+				// {{{ performance stats
 				let frametime = ui.input(|i| i.unstable_dt);
 				ui.label(format!(
 					"Frametime: {:.4}ms ({} FPS)",
 					(frametime * 1000.0),
 					(1.0 / frametime).round(),
 				));
-
-				ui.horizontal(|ui| {
-					ui.checkbox(&mut self.render.lighting, "Lighting and shading");
-					if self.render.lighting {
-						ui.label(format!("(sample {frame_index})"));
-					}
-				});
+				// }}}
 
 				// {{{ world settings
 				ui.collapsing("World settings", |ui| {
@@ -130,7 +127,14 @@ impl Settings {
 
 				// {{{ render settings
 				ui.collapsing("Render settings", |ui| {
-					ui.checkbox(&mut self.render.gizmos, "Show gizmos");
+					ui.horizontal(|ui| {
+						ui.checkbox(&mut self.render.lighting, "Realistic lighting");
+						if self.render.lighting {
+							ui.label(format!("(sample {frame_index})"));
+						}
+					});
+
+					ui.checkbox(&mut self.render.lock_camera, "Lock camera (useful when rendering)");
 					ui.checkbox(&mut self.render.denoise, "Denoising");
 
 					ui.horizontal(|ui| {
@@ -157,6 +161,12 @@ impl Settings {
 				});
 				// }}}
 
+				// take screenshot button
+				if ui.button("Save screenshot").clicked() {
+					screenshot = true;
+				}
+
+				// {{{ clear data button
 				if ui.button("Clear all data").clicked() {
 					self.data_confirmation = true;
 				}
@@ -177,26 +187,22 @@ impl Settings {
 									self.data_confirmation = false;
 								}
 
-								// make confirm button red on hover
-								ui.visuals_mut().widgets.hovered.weak_bg_fill =
-									Color32::from_rgb(240, 84, 84);
-								ui.visuals_mut().widgets.hovered.bg_stroke.color =
-									Color32::from_rgb(240, 84, 84);
-								ui.visuals_mut().widgets.hovered.fg_stroke.color =
-									Color32::from_rgb(10, 10, 10);
+								crate::util::red_hover_button(ui);
 
 								if ui.button("Confirm").clicked() {
-									self.data_confirmation = false;
 									clear_data = true;
+									self.data_confirmation = false;
 								}
 							})
 						});
 				}
+				// }}}
 			});
 
 		SettingsResponse {
 			focused,
 			clear_data,
+			screenshot,
 		}
 	}
 }

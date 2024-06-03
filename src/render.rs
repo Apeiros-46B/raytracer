@@ -80,7 +80,7 @@ impl RaytracingApp {
 	pub fn paint(
 		&mut self,
 		ui: &mut egui::Ui,
-		settings_response: crate::settings::SettingsResponse,
+		ui_focused: bool,
 	) {
 		let scr = ui.clip_rect();
 		let scr_size = scr.size();
@@ -107,16 +107,18 @@ impl RaytracingApp {
 					raytracer.frame_index += 1;
 
 					// update camera
-					let fov = data.settings.render.fov;
-					data.camera.set_fov(fov);
-					if !settings_response.focused && data.camera.update(input.clone()) {
-						// don't respond to keypresses if text is focused
-						// reset frame index if moved
-						raytracer.frame_index = 0;
-					};
-					if data.camera.recalculate_ray_dirs {
-						raytracer.calculate_ray_directions(gl, &data.camera);
-						data.camera.recalculate_ray_dirs = false;
+					if !data.settings.render.lock_camera {
+						let fov = data.settings.render.fov;
+						data.camera.set_fov(fov);
+						if !ui_focused && data.camera.update(input.clone()) {
+							// don't respond to keypresses if text is focused
+							// reset frame index if moved
+							raytracer.frame_index = 0;
+						};
+						if data.camera.recalculate_ray_dirs {
+							raytracer.calculate_ray_directions(gl, &data.camera);
+							data.camera.recalculate_ray_dirs = false;
+						}
 					}
 				},
 			)),

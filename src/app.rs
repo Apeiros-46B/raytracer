@@ -20,8 +20,6 @@ pub struct PersistentData {
 	pub scene: Scene,
 }
 
-const DATA_KEY: &str = "raytracer_data";
-
 impl PersistentData {
 	fn new(scr_size: glm::Vec2) -> Self {
 		Self {
@@ -32,11 +30,14 @@ impl PersistentData {
 	}
 }
 
+const DATA_KEY: &str = "raytracer_data";
+
 impl RaytracingApp {
 	pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
 		let scr_size = cc.egui_ctx.screen_rect().size();
 		let scr_size = glm::vec2(scr_size.x, scr_size.y);
 
+		// {{{ initialize persistence
 		let mut data = PersistentData::new(scr_size);
 		let default_data = data.clone();
 
@@ -45,10 +46,12 @@ impl RaytracingApp {
 				data = value;
 			}
 		}
+		// }}}
 
+		// obtain GL context for custom painting
 		let gl = cc.gl.as_ref().expect("obtaining GL context failed");
 
-		// reduce window shadow size
+		// {{{ reduce window shadow size
 		cc.egui_ctx.set_visuals(egui::Visuals {
 			window_shadow: egui::epaint::Shadow {
 				offset: egui::Vec2::splat(0.0),
@@ -58,6 +61,7 @@ impl RaytracingApp {
 			},
 			..Default::default()
 		});
+		// }}}
 
 		Self {
 			renderer: Arc::new(Mutex::new(Raytracer::new(
@@ -79,22 +83,37 @@ impl eframe::App for RaytracingApp {
 	fn update(&mut self, egui: &egui::Context, _frame: &mut eframe::Frame) {
 		let mut data = self.data.lock();
 
+		// {{{ draw windows
+		// draw settings window
 		let frame_index = self.renderer.lock().frame_index;
 		let settings_response = data.settings.window(egui, frame_index);
 
+		// draw scene window
+		let scene_response = data.scene.window(egui);
+		// }}}
+
+		// screenshot if requested
+		if settings_response.screenshot {
+			// TODO: screenshot the canvas somehow
+			println!("Taking screenshot")
+		}
+
+		// clear data if requested
 		if settings_response.clear_data {
 			*data = self.default_data.clone();
 		}
 
-		data.scene.window(egui);
-
+		// fixes error with simultaneous mutable borrow of self field when rendering
 		drop(data);
 
+		// {{{ main painting
 		egui::CentralPanel::default().show(egui, |ui| {
-			self.paint(ui, settings_response);
+			self.paint(ui, settings_response.focused || scene_response.focused);
 		});
 
+		// request repaint so our path tracing continues sampling without activity
 		egui.request_repaint_of(egui.viewport_id());
+		// }}}
 	}
 
 	fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {

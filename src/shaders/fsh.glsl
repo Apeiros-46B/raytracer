@@ -99,14 +99,14 @@ void main() {
 
 		Sphere sp = Sphere(sphere_radii[i], sphere_positions[i]);
 		RayHit hit = ray_sphere_intersection(primary, sp);
+
 		if (hit.hit) {
 		 	vec3 hit_pos = (primary.origin - sp.position) + primary.direction * hit.distance;
 		 	float light_fac = max(dot(normalize(hit_pos), sun_dir), 0.0);
 		 	light_fac *= sun_strength;
-
 			out_color = vec4(vec3(light_fac), 1);
-			did_hit = true;
 
+			did_hit = true;
 			break;
 		}
 	}
