@@ -5,7 +5,7 @@ use eframe::{
 use nalgebra_glm as glm;
 
 use crate::{
-	app::RaytracingApp, camera::Camera, scene::Scene, uniform::Uniforms,
+	app::RaytracingApp, camera::Camera, scene::Scene, settings::Settings,
 };
 
 impl RaytracingApp {
@@ -16,9 +16,7 @@ impl RaytracingApp {
 		let fov = self.settings.render.fov;
 		let renderer = self.renderer.clone();
 
-		// TODO: remove the whole uniforms struct and just let apply_uniforms take
-		// a clone of settings
-		let uniforms = Uniforms::new(&self.settings, scr_size);
+		let settings = self.settings.clone();
 		let input_state = ui.input(|i| i.clone());
 
 		let callback = egui::PaintCallback {
@@ -29,7 +27,7 @@ impl RaytracingApp {
 					let gl = painter.gl();
 
 					raytracer.set_scr_size(gl, glm::vec2(scr_size.x, scr_size.y));
-					raytracer.paint(gl, uniforms);
+					raytracer.paint(gl, settings.clone());
 					raytracer.frame_index += 1;
 
 					// update camera
@@ -56,15 +54,14 @@ pub struct Raytracer {
 	prepass_texture: glow::Texture,
 	prepass_program: Program,
 	prepass_verts: VertexArray,
-
 	program: Program,
 	verts: VertexArray,
 
-	camera: Camera,
-	scene: Scene,
-
 	frame_index: u32,
 	scr_size: glm::Vec2,
+
+	camera: Camera,
+	scene: Scene,
 }
 
 // {{{ shader compilation boilerplate
@@ -197,15 +194,14 @@ impl Raytracer {
 				prepass_texture,
 				prepass_program,
 				prepass_verts,
-
 				program,
 				verts,
 
-				camera,
-				scene,
-
 				frame_index: 0,
 				scr_size,
+
+				camera,
+				scene,
 			};
 			this.calculate_ray_directions(gl);
 			this
@@ -224,11 +220,11 @@ impl Raytracer {
 		}
 	}
 
-	pub fn paint(&mut self, gl: &Context, uniforms: Uniforms) {
+	pub fn paint(&mut self, gl: &Context, settings: Settings) {
 		unsafe {
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 			gl.use_program(Some(self.program));
-			self.apply_uniforms(gl, uniforms);
+			self.apply_uniforms(gl, settings);
 			gl.bind_texture(glow::TEXTURE_2D, Some(self.prepass_texture));
 			gl.bind_vertex_array(Some(self.verts));
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
@@ -302,12 +298,12 @@ impl Raytracer {
 	}
 	// }}}
 
-	fn apply_uniforms(&mut self, gl: &Context, uniforms: Uniforms) {
+	fn apply_uniforms(&mut self, gl: &Context, settings: Settings) {
 		unsafe {
 			gl.uniform_2_f32(
 				gl.get_uniform_location(self.program, "scr_size").as_ref(),
-				uniforms.scr_size[0],
-				uniforms.scr_size[1],
+				self.scr_size.x,
+				self.scr_size.y,
 			);
 
 			gl.uniform_1_u32(
@@ -316,31 +312,40 @@ impl Raytracer {
 				self.frame_index,
 			);
 
-			// {{{ sky colors
+			// {{{ sky settings
+			// sky color
 			gl.uniform_3_f32(
 				gl.get_uniform_location(self.program, "sky_color").as_ref(),
-				uniforms.sky_color[0],
-				uniforms.sky_color[1],
-				uniforms.sky_color[2],
+				settings.world.sky_color[0],
+				settings.world.sky_color[1],
+				settings.world.sky_color[2],
 			);
 
+			// sun direction
+			let beta_cos = settings.world.sun_elevation.cos();
+			let x = settings.world.sun_rotation.cos() * beta_cos;
+			let y = settings.world.sun_elevation.sin();
+			let z = settings.world.sun_rotation.sin() * beta_cos;
+			let mag = (x.powi(2) + y.powi(2) + z.powi(2)).sqrt();
 			gl.uniform_3_f32(
 				gl.get_uniform_location(self.program, "sun_dir").as_ref(),
-				uniforms.sun_dir[0],
-				uniforms.sun_dir[1],
-				uniforms.sun_dir[2],
+				x / mag,
+				y / mag,
+				z / mag,
 			);
 
+			// sun strength
 			gl.uniform_1_f32(
 				gl.get_uniform_location(self.program, "sun_strength")
 					.as_ref(),
-				uniforms.sun_strength,
+				settings.world.sun_strength,
 			);
 			// }}}
 
+			// maximum light bounces
 			gl.uniform_1_u32(
 				gl.get_uniform_location(self.program, "bounces").as_ref(),
-				uniforms.max_bounces,
+				settings.render.max_bounces,
 			);
 
 			// {{{ sphere
@@ -362,28 +367,13 @@ impl Raytracer {
 			);
 			// }}}
 
-			// {{{ camera
+			// camera position
 			gl.uniform_3_f32(
 				gl.get_uniform_location(self.program, "camera_pos").as_ref(),
 				self.camera.pos.x,
 				self.camera.pos.y,
 				self.camera.pos.z,
 			);
-
-			gl.uniform_matrix_4_f32_slice(
-				gl.get_uniform_location(self.program, "camera_inv_proj")
-					.as_ref(),
-				false, // no transpose, it's already in column-major order
-				self.camera.inv_proj.as_slice(),
-			);
-
-			gl.uniform_matrix_4_f32_slice(
-				gl.get_uniform_location(self.program, "camera_inv_view")
-					.as_ref(),
-				false, // no transpose, it's already in column-major order
-				self.camera.inv_view.as_slice(),
-			);
-			// }}}
 		}
 	}
 }

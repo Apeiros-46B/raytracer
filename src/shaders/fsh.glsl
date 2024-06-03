@@ -35,8 +35,6 @@ uniform float sphere_radii[MAX_SPHERES];
 uniform vec3 sphere_positions[MAX_SPHERES];
 
 uniform vec3 camera_pos;
-uniform mat4 camera_inv_proj;
-uniform mat4 camera_inv_view;
 
 uniform usampler2D ray_directions;
 

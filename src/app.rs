@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use eframe::glow::HasContext;
 use egui::mutex::Mutex;
 use nalgebra_glm as glm;
 
@@ -40,10 +39,7 @@ impl RaytracingApp {
 		Self {
 			renderer: Arc::new(Mutex::new(Raytracer::new(
 				gl,
-				crate::camera::Camera::new(
-					70.0_f32.to_radians(),
-					scr_size,
-				),
+				crate::camera::Camera::new(70.0_f32.to_radians(), scr_size),
 				crate::scene::Scene {
 					radii: Box::new([1.0]),
 					pos: Box::new([0.0, 0.0, 0.0]),
@@ -61,10 +57,10 @@ impl eframe::App for RaytracingApp {
 	// }
 
 	fn update(&mut self, egui: &egui::Context, _frame: &mut eframe::Frame) {
-		let focused = self.settings.window(egui);
+		let settings_response = self.settings.window(egui);
 
 		egui::CentralPanel::default().show(egui, |ui| {
-			self.paint(ui, focused);
+			self.paint(ui, settings_response.focused);
 		});
 
 		egui.request_repaint_of(egui.viewport_id());
