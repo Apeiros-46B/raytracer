@@ -1,15 +1,29 @@
 use egui::Slider;
 
-use crate::util::AngleControl;
+use crate::util::{AngleControl, DataResponse};
 
-#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Settings {
 	pub world: WorldSettings,
 	pub render: RenderSettings,
 
 	#[serde(skip)]
+	pub response: SettingsResponse,
+
+	#[serde(skip)]
 	data_modal: bool,
+}
+
+impl Default for Settings {
+	fn default() -> Self {
+		Self {
+			world: WorldSettings::default(),
+			render: RenderSettings::default(),
+			response: Self::first_response(),
+			data_modal: false,
+		}
+	}
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -60,25 +74,34 @@ impl Default for RenderSettings {
 	}
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct SettingsResponse {
 	pub focused: bool,
 	pub clear_data: bool,
 	pub screenshot: bool,
+	pub sun_angle_changed: bool,
+}
+
+impl DataResponse<SettingsResponse> for Settings {
+	fn first_response() -> SettingsResponse {
+		// sun angle needs to be calculated once first
+		// but should NOT be recalculated every frame
+		SettingsResponse {
+			focused: false,
+			clear_data: false,
+			screenshot: false,
+			sun_angle_changed: true,
+		}
+	}
+
+	fn reset_response(&mut self) {
+		self.response = SettingsResponse::default();
+	}
 }
 
 impl Settings {
-	pub fn window(
-		&mut self,
-		egui: &egui::Context,
-		frame_index: u32,
-	) -> SettingsResponse {
-		let mut focused = false;
-		let mut clear_data = false;
-		let mut screenshot = false;
-
+	pub fn window(&mut self, egui: &egui::Context, frame_index: u32) {
 		egui::Window::new("Settings")
-			.movable(false)
 			.resizable(false)
 			.show(egui, |ui| {
 				// {{{ performance stats
@@ -94,14 +117,14 @@ impl Settings {
 				ui.collapsing("World settings", |ui| {
 					ui.horizontal(|ui| {
 						ui.label("Background color:");
-						focused |= ui
+						self.response.focused |= ui
 							.color_edit_button_rgb(&mut self.world.sky_color)
 							.has_focus();
 					});
 
 					ui.horizontal(|ui| {
 						ui.label("Sun warmth:");
-						focused |= ui
+						self.response.focused |= ui
 							.add(
 								Slider::new(&mut self.world.sun_warmth, 1200.0..=12000.0)
 									.suffix("K"),
@@ -111,19 +134,23 @@ impl Settings {
 
 					ui.horizontal(|ui| {
 						ui.label("Sun strength:");
-						focused |= ui
+						self.response.focused |= ui
 							.add(Slider::new(&mut self.world.sun_strength, 0.0..=10.0))
 							.has_focus();
 					});
 
 					ui.horizontal(|ui| {
 						ui.label("Sun elevation:");
-						focused |= ui.drag_angle(&mut self.world.sun_elevation).has_focus();
+						let angle = ui.drag_angle(&mut self.world.sun_elevation);
+						self.response.focused |= angle.has_focus();
+						self.response.sun_angle_changed |= angle.changed();
 					});
 
 					ui.horizontal(|ui| {
 						ui.label("Sun rotation:");
-						focused |= ui.drag_angle(&mut self.world.sun_rotation).has_focus();
+						let angle = ui.drag_angle(&mut self.world.sun_rotation);
+						self.response.focused |= angle.has_focus();
+						self.response.sun_angle_changed |= angle.changed();
 					});
 				});
 				// }}}
@@ -148,14 +175,14 @@ impl Settings {
 
 					ui.horizontal(|ui| {
 						ui.label("Max ray bounces:");
-						focused |= ui
+						self.response.focused |= ui
 							.add(Slider::new(&mut self.render.max_bounces, 1..=10))
 							.has_focus();
 					});
 
 					ui.horizontal(|ui| {
 						ui.label("Field of view:");
-						focused |= ui
+						self.response.focused |= ui
 							.add(
 								Slider::new(
 									&mut self.render.fov,
@@ -168,9 +195,8 @@ impl Settings {
 				});
 				// }}}
 
-				// take screenshot button
-				if ui.button("Save screenshot").clicked() {
-					screenshot = true;
+				if ui.button("Temporarily hide windows").clicked() {
+					self.response.screenshot = true;
 				}
 
 				// {{{ clear data button
@@ -190,16 +216,10 @@ impl Settings {
 					},
 					crate::util::red_hover_button,
 					|| {
-						clear_data = true;
+						self.response.clear_data = true;
 					},
 				);
 				// }}}
 			});
-
-		SettingsResponse {
-			focused,
-			clear_data,
-			screenshot,
-		}
 	}
 }

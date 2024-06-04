@@ -7,6 +7,7 @@ use nalgebra_glm as glm;
 use crate::{
 	app::{PersistentData, RaytracingApp},
 	camera::Camera,
+	util::DataResponse,
 };
 
 pub struct Raytracer {
@@ -77,12 +78,7 @@ unsafe fn compile_shaders(
 // }}}
 
 impl RaytracingApp {
-	pub fn paint(
-		&mut self,
-		ui: &mut egui::Ui,
-		ui_focused: bool,
-		clear_data: bool,
-	) {
+	pub fn paint(&mut self, ui: &mut egui::Ui, ui_focused: bool) {
 		let scr = ui.clip_rect();
 		let scr_size = scr.size();
 		let raytracer_mutex = self.renderer.clone();
@@ -108,7 +104,7 @@ impl RaytracingApp {
 					raytracer.paint(gl, &data);
 					raytracer.frame_index += 1;
 
-					// update camera
+					// {{{ update camera
 					if !data.settings.render.lock_camera {
 						let fov = data.settings.render.fov;
 						data.camera.set_fov(fov);
@@ -122,6 +118,10 @@ impl RaytracingApp {
 							data.camera.recalculate_ray_dirs = false;
 						}
 					}
+					// }}}
+
+					data.settings.reset_response();
+					data.scene.reset_response();
 				},
 			)),
 		};
@@ -354,8 +354,10 @@ impl Raytracer {
 				crate::util::flatten_mats(&data.scene.pos),
 			);
 
-			gl.uniform_3_f32_slice(
-				gl.get_uniform_location(self.program, "sphere_transform").as_ref(),
+			gl.uniform_matrix_4_f32_slice(
+				gl.get_uniform_location(self.program, "sphere_transform")
+					.as_ref(),
+				false, // no transpose
 				crate::util::flatten_mats(&data.scene.transform_mats),
 			);
 			// }}}
@@ -370,17 +372,19 @@ impl Raytracer {
 			);
 
 			// sun direction
-			let beta_cos = data.settings.world.sun_elevation.cos();
-			let x = data.settings.world.sun_rotation.cos() * beta_cos;
-			let y = data.settings.world.sun_elevation.sin();
-			let z = data.settings.world.sun_rotation.sin() * beta_cos;
-			let mag = (x.powi(2) + y.powi(2) + z.powi(2)).sqrt();
-			gl.uniform_3_f32(
-				gl.get_uniform_location(self.program, "sun_dir").as_ref(),
-				x / mag,
-				y / mag,
-				z / mag,
-			);
+			if data.settings.response.sun_angle_changed {
+				let beta_cos = data.settings.world.sun_elevation.cos();
+				let x = data.settings.world.sun_rotation.cos() * beta_cos;
+				let y = data.settings.world.sun_elevation.sin();
+				let z = data.settings.world.sun_rotation.sin() * beta_cos;
+				let mag = (x.powi(2) + y.powi(2) + z.powi(2)).sqrt();
+				gl.uniform_3_f32(
+					gl.get_uniform_location(self.program, "sun_dir").as_ref(),
+					x / mag,
+					y / mag,
+					z / mag,
+				);
+			}
 
 			// sun strength
 			gl.uniform_1_f32(

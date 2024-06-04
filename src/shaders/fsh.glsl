@@ -66,10 +66,11 @@ uniform usampler2D ray_directions;
 // }}}
 
 // {{{ intersection functions
-RayHit ray_sphere_intersection(Ray ray, Sphere sphere, mat4 transform) {
+RayHit ray_sphere_intersection(Ray ray, Sphere sphere) {
+// RayHit ray_sphere_intersection(Ray ray, Sphere sphere, mat4 transform) {
 	// transform ray origin based on sphere position
-	// vec3 origin = ray.origin - sphere.position;
-	vec3 origin = vec3(transform * vec4(ray.origin, 1.0));
+	vec3 origin = ray.origin - sphere.position;
+	// vec3 origin = vec3(transform * vec4(ray.origin, 1.0));
 
 	float a = dot(ray.direction, ray.direction);
 	float b = 2.0 * dot(origin, ray.direction);
@@ -100,7 +101,8 @@ void main() {
 		}
 
 		Sphere sp = Sphere(sphere_radii[i], sphere_pos[i]);
-		RayHit hit = ray_sphere_intersection(primary, sp, sphere_transform[i]);
+		RayHit hit = ray_sphere_intersection(primary, sp);
+		// RayHit hit = ray_sphere_intersection(primary, sp, sphere_transform[i]);
 
 		if (hit.hit) {
 		 	vec3 hit_pos = (primary.origin - sp.position) + primary.direction * hit.distance;

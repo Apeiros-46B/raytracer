@@ -1,10 +1,10 @@
 use std::fmt::Display;
 
-use egui::Ui;
-use glm::{vec3, Vec3};
+use egui::{DragValue, Ui};
+use glm::{inverse, vec3, Vec3};
 use nalgebra_glm as glm;
 
-use crate::util::{modal, AngleControl};
+use crate::util::{modal, AngleControl, DataResponse};
 
 #[repr(u32)]
 pub enum ObjectType {
@@ -21,6 +21,9 @@ pub struct Scene {
 	pub rot: Vec<Vec3>,
 	pub scl: Vec<Vec3>,
 	pub transform_mats: Vec<glm::Mat4>,
+
+	#[serde(skip)]
+	pub response: SceneResponse,
 
 	rename_modal: bool,
 	delete_modal: bool,
@@ -39,6 +42,8 @@ impl Default for Scene {
 			scl: vec![vec3(1.0, 1.0, 1.0)],
 			transform_mats: vec![glm::identity()],
 
+			response: Self::first_response(),
+
 			rename_modal: false,
 			delete_modal: false,
 			pending_rename: "".to_string(),
@@ -47,82 +52,64 @@ impl Default for Scene {
 	}
 }
 
+#[derive(Clone, Copy, Default)]
 pub struct SceneResponse {
 	pub focused: bool,
 }
 
-impl Scene {
-	pub fn window(&mut self, egui: &egui::Context) -> SceneResponse {
-		let mut focused = false;
+impl DataResponse<SceneResponse> for Scene {
+	fn first_response() -> SceneResponse {
+		SceneResponse::default()
+	}
 
+	fn reset_response(&mut self) {
+		self.response = SceneResponse::default();
+	}
+}
+
+// {{{ generate transformation UI functions
+macro_rules! generate_transformer_function {
+	($prop:ident) => {
+		paste::paste! {
+			fn [<transform_ $prop>](
+				&mut self,
+				ui: &mut Ui,
+				label: &'static str,
+				drag_speed: f64,
+				obj_changed: &mut bool,
+				extra: impl Fn(DragValue) -> DragValue,
+			) {
+				ui.label(label);
+				ui.horizontal(|ui| {
+					for (i, axis) in (0..3).zip("XYZ".chars()) {
+						let response = ui.add(extra(
+							DragValue::new(&mut self.$prop[self.selected].as_mut_slice()[i])
+								.prefix(format!("{axis}: "))
+								.speed(drag_speed),
+						));
+						*obj_changed |= response.changed();
+						self.response.focused |= response.has_focus();
+					}
+				});
+			}
+		}
+	};
+}
+// }}}
+
+impl Scene {
+	pub fn window(&mut self, egui: &egui::Context) {
 		egui::Window::new("Scene")
-			.movable(false)
 			.resizable(false)
-			.anchor(egui::Align2::RIGHT_TOP, [-20.0, 20.0])
+			.anchor(egui::Align2::RIGHT_TOP, [-16.0, 16.0])
 			.show(egui, |ui| {
 				let modal_open = self.rename_modal || self.delete_modal;
 
 				self.object_selection_menu(ui, modal_open);
-				self.object_renaming_button(egui, ui, modal_open, &mut focused);
+				self.object_renaming_button(egui, ui, modal_open);
 				self.object_deletion_button(egui, ui, modal_open);
-
-				// {{{ position, rotation, scale
-				let drag_speed =
-					ui.input(|i| if i.modifiers.shift { 0.01 } else { 0.1 });
-
-				let mut obj_modified = false;
-
-				ui.label("\nPosition");
-				ui.horizontal(|ui| {
-					for (i, axis) in (0..3).zip("XYZ".chars()) {
-						let value = ui.add(
-							egui::DragValue::new(
-								&mut self.pos[self.selected].as_mut_slice()[i],
-							)
-							.prefix(format!("{axis}: "))
-							.speed(drag_speed),
-						);
-						obj_modified |= value.dragged() || value.has_focus();
-					}
-				});
-
-				ui.label("\nRotation");
-				ui.horizontal(|ui| {
-					for (i, axis) in (0..3).zip("XYZ".chars()) {
-						let value = ui.add(
-							egui::DragValue::new(
-								&mut self.rot[self.selected].as_mut_slice()[i],
-							)
-							.prefix(format!("{axis}: "))
-							.speed(drag_speed)
-							.angle(),
-						);
-						obj_modified |= value.dragged() || value.has_focus();
-					}
-				});
-
-				ui.label("\nScale");
-				ui.horizontal(|ui| {
-					for (i, axis) in (0..3).zip("XYZ".chars()) {
-						let value = ui.add(
-							egui::DragValue::new(
-								&mut self.scl[self.selected].as_mut_slice()[i],
-							)
-							.prefix(format!("{axis}: "))
-							.suffix("×")
-							.speed(drag_speed),
-						);
-						obj_modified |= value.dragged() || value.has_focus();
-					}
-				});
-
-				if obj_modified {
-					self.recalculate_transforms();
-				}
-				// }}}
+				self.transformation_interface(ui);
 			});
-
-		SceneResponse { focused }
 	}
 
 	// {{{ object selection menu
@@ -154,7 +141,6 @@ impl Scene {
 		egui: &egui::Context,
 		ui: &mut Ui,
 		modal_open: bool,
-		focused: &mut bool,
 	) {
 		if ui.button("Rename").clicked() && !modal_open {
 			self.rename_modal = true;
@@ -169,7 +155,7 @@ impl Scene {
 			&mut self.rename_modal,
 			|ui| {
 				ui.label("New name:");
-				*focused |= ui
+				self.response.focused |= ui
 					.text_edit_singleline(&mut self.pending_rename)
 					.has_focus();
 			},
@@ -214,15 +200,42 @@ impl Scene {
 	}
 	// }}}
 
+	// {{{ position, rotation, scale
+	fn transformation_interface(&mut self, ui: &mut Ui) {
+		ui.collapsing("Transform", |ui| {
+			let drag_speed = ui.input(|i| if i.modifiers.shift { 0.01 } else { 0.1 });
+
+			let mut changed = false;
+
+			self.transform_pos(ui, "Position", drag_speed, &mut changed, |drag| drag);
+			self.transform_rot(ui, "Rotation", drag_speed, &mut changed, |drag| {
+				drag.angle()
+			});
+			self.transform_scl(ui, "Scale", drag_speed, &mut changed, |drag| {
+				drag.suffix("×")
+			});
+
+			if changed {
+				self.recalculate_transforms();
+			}
+		});
+	}
+	// }}}
+
+	generate_transformer_function!(pos);
+	generate_transformer_function!(rot);
+	generate_transformer_function!(scl);
+
 	pub fn recalculate_transforms(&mut self) {
 		for (i, mat) in self.transform_mats.iter_mut().enumerate() {
 			*mat = glm::identity();
 			// in reverse order because of right-multiplying
-			glm::rotate(mat, self.rot[i].x, &Vec3::x_axis());
-			glm::rotate(mat, self.rot[i].y, &Vec3::y_axis());
-			glm::rotate(mat, self.rot[i].z, &Vec3::z_axis());
+			glm::rotate_x(mat, self.rot[i].x);
+			glm::rotate_y(mat, self.rot[i].y);
+			glm::rotate_z(mat, self.rot[i].z);
 			glm::scale(mat, &self.scl[i]);
 			glm::translate(mat, &self.pos[i]);
+			*mat = inverse(mat);
 		}
 	}
 }

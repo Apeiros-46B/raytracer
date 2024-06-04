@@ -10,7 +10,9 @@ use crate::{
 pub struct RaytracingApp {
 	pub renderer: Arc<Mutex<Raytracer>>,
 	pub data: Arc<Mutex<PersistentData>>,
-	pub default_data: PersistentData,
+
+	default_data: PersistentData,
+	screenshot_time: Option<f32>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -48,11 +50,12 @@ impl RaytracingApp {
 		}
 		// }}}
 
-		// obtain GL context for custom painting
+		// obtain contexts
 		let gl = cc.gl.as_ref().expect("obtaining GL context failed");
+		let egui = &cc.egui_ctx;
 
 		// {{{ reduce window shadow size
-		cc.egui_ctx.set_visuals(egui::Visuals {
+		egui.set_visuals(egui::Visuals {
 			window_shadow: egui::epaint::Shadow {
 				offset: egui::Vec2::splat(0.0),
 				blur: 16.0,
@@ -63,6 +66,9 @@ impl RaytracingApp {
 		});
 		// }}}
 
+		// reset window positions
+		egui.memory_mut(|mem| mem.reset_areas());
+
 		Self {
 			renderer: Arc::new(Mutex::new(Raytracer::new(
 				gl,
@@ -71,6 +77,7 @@ impl RaytracingApp {
 			))),
 			data: Arc::new(Mutex::new(data)),
 			default_data,
+			screenshot_time: None,
 		}
 	}
 }
@@ -86,38 +93,49 @@ impl eframe::App for RaytracingApp {
 		// {{{ draw windows
 		// draw settings window
 		let frame_index = self.renderer.lock().frame_index;
-		let settings_response = data.settings.window(egui, frame_index);
+		if self.screenshot_time.is_none() {
+			data.settings.window(egui, frame_index);
+		}
+		let settings_response = data.settings.response;
 
 		// draw scene window
-		let scene_response = data.scene.window(egui);
+		if self.screenshot_time.is_none() {
+			data.scene.window(egui);
+		}
+		let scene_response = data.scene.response;
 		// }}}
 
-		// screenshot if requested
+		// {{{ respond
+		// prepare screenshot if requested
 		if settings_response.screenshot {
-			// TODO: screenshot the canvas somehow
-			println!("Taking screenshot")
+			self.screenshot_time = Some(0.0);
 		}
 
 		// clear data if requested
 		if settings_response.clear_data {
 			*data = self.default_data.clone();
 		}
+		// }}}
 
 		// fixes error with simultaneous mutable borrow of self field when rendering
 		drop(data);
 
-		// {{{ main painting
+		// main painting
 		egui::CentralPanel::default().show(egui, |ui| {
-			self.paint(
-				ui,
-				settings_response.focused || scene_response.focused,
-				settings_response.clear_data,
-			);
+			self.paint(ui, settings_response.focused || scene_response.focused);
 		});
 
 		// request repaint so our path tracing continues sampling without activity
 		egui.request_repaint_of(egui.viewport_id());
-		// }}}
+
+		// count up to 5 seconds. when 5 seconds are over, windows are shown again
+		let dt = egui.input(|i| i.unstable_dt);
+		if let Some(time) = self.screenshot_time.as_mut() {
+			*time += dt;
+			if *time > 5.0 {
+				self.screenshot_time = None;
+			}
+		}
 	}
 
 	fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {

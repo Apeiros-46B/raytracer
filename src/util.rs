@@ -84,3 +84,9 @@ pub fn flatten_mats<T, const R: usize, const C: usize>(
 		std::slice::from_raw_parts(ptr, src.len() * R * C)
 	}
 }
+
+// "responses," see SettingsResponse and SceneResponse
+pub trait DataResponse<T> {
+	fn first_response() -> T;
+	fn reset_response(&mut self);
+}
