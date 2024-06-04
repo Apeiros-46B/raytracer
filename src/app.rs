@@ -37,7 +37,7 @@ impl RaytracingApp {
 		let scr_size = cc.egui_ctx.screen_rect().size();
 		let scr_size = glm::vec2(scr_size.x, scr_size.y);
 
-		// {{{ initialize persistence
+		// {{{ initialize persistent data
 		let mut data = PersistentData::new(scr_size);
 		let default_data = data.clone();
 
@@ -108,7 +108,11 @@ impl eframe::App for RaytracingApp {
 
 		// {{{ main painting
 		egui::CentralPanel::default().show(egui, |ui| {
-			self.paint(ui, settings_response.focused || scene_response.focused);
+			self.paint(
+				ui,
+				settings_response.focused || scene_response.focused,
+				settings_response.clear_data,
+			);
 		});
 
 		// request repaint so our path tracing continues sampling without activity

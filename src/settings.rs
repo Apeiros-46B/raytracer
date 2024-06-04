@@ -1,4 +1,6 @@
-use egui::{Color32, Slider};
+use egui::Slider;
+
+use crate::util::AngleControl;
 
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -7,7 +9,7 @@ pub struct Settings {
 	pub render: RenderSettings,
 
 	#[serde(skip)]
-	data_confirmation: bool,
+	data_modal: bool,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -77,6 +79,7 @@ impl Settings {
 
 		egui::Window::new("Settings")
 			.movable(false)
+			.resizable(false)
 			.show(egui, |ui| {
 				// {{{ performance stats
 				let frametime = ui.input(|i| i.unstable_dt);
@@ -134,8 +137,14 @@ impl Settings {
 						}
 					});
 
-					ui.checkbox(&mut self.render.lock_camera, "Lock camera (useful when rendering)");
-					ui.checkbox(&mut self.render.denoise, "Denoising");
+					if self.render.lighting {
+						ui.checkbox(&mut self.render.denoise, "Denoising");
+					}
+
+					ui.checkbox(
+						&mut self.render.lock_camera,
+						"Lock camera (useful when rendering)",
+					);
 
 					ui.horizontal(|ui| {
 						ui.label("Max ray bounces:");
@@ -152,9 +161,7 @@ impl Settings {
 									&mut self.render.fov,
 									(50.0_f32.to_radians())..=(120.0_f32.to_radians()),
 								)
-								.suffix("°")
-								.custom_formatter(|n, _| n.to_degrees().round().to_string())
-								.custom_parser(|s| s.parse().map(|n: f64| n.to_radians()).ok()),
+								.angle(),
 							)
 							.has_focus();
 					});
@@ -168,34 +175,24 @@ impl Settings {
 
 				// {{{ clear data button
 				if ui.button("Clear all data").clicked() {
-					self.data_confirmation = true;
+					self.data_modal = true;
 				}
 
-				if self.data_confirmation {
-					egui::Window::new("Clear all data?")
-						.collapsible(false)
-						.resizable(false)
-						.anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-						.show(egui, |ui| {
-							ui.label("This will delete:");
-							ui.label("- Scene objects and associated materials");
-							ui.label("- Camera parameters");
-							ui.label("- Saved settings");
-
-							ui.horizontal(|ui| {
-								if ui.button("Cancel").highlight().clicked() {
-									self.data_confirmation = false;
-								}
-
-								crate::util::red_hover_button(ui);
-
-								if ui.button("Confirm").clicked() {
-									clear_data = true;
-									self.data_confirmation = false;
-								}
-							})
-						});
-				}
+				crate::util::modal(
+					egui,
+					"Clear all data?",
+					&mut self.data_modal,
+					|ui| {
+						ui.label("This will delete:");
+						ui.label("- Scene objects and associated materials");
+						ui.label("- Camera parameters");
+						ui.label("- Saved settings");
+					},
+					crate::util::red_hover_button,
+					|| {
+						clear_data = true;
+					},
+				);
 				// }}}
 			});
 

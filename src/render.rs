@@ -81,6 +81,7 @@ impl RaytracingApp {
 		&mut self,
 		ui: &mut egui::Ui,
 		ui_focused: bool,
+		clear_data: bool,
 	) {
 		let scr = ui.clip_rect();
 		let scr_size = scr.size();
@@ -103,6 +104,7 @@ impl RaytracingApp {
 						&mut data.camera,
 						glm::vec2(scr_size.x, scr_size.y),
 					);
+
 					raytracer.paint(gl, &data);
 					raytracer.frame_index += 1;
 
@@ -349,7 +351,12 @@ impl Raytracer {
 
 			gl.uniform_3_f32_slice(
 				gl.get_uniform_location(self.program, "sphere_pos").as_ref(),
-				&data.scene.pos,
+				crate::util::flatten_mats(&data.scene.pos),
+			);
+
+			gl.uniform_3_f32_slice(
+				gl.get_uniform_location(self.program, "sphere_transform").as_ref(),
+				crate::util::flatten_mats(&data.scene.transform_mats),
 			);
 			// }}}
 
@@ -386,7 +393,8 @@ impl Raytracer {
 			// {{{ render settings
 			// maximum light bounces
 			gl.uniform_1_u32(
-				gl.get_uniform_location(self.program, "max_bounces").as_ref(),
+				gl.get_uniform_location(self.program, "max_bounces")
+					.as_ref(),
 				data.settings.render.max_bounces,
 			);
 			// }}}

@@ -1,8 +1,8 @@
 use egui::Key;
-use glm::{
-	inverse, look_at, perspective_fov, quat_angle_axis, Mat4, Vec2, Vec3,
+use nalgebra_glm::{
+	self as glm, inverse, look_at, perspective_fov, quat_angle_axis, Mat4, Vec2,
+	Vec3,
 };
-use nalgebra_glm as glm;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Camera {
