@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use egui::{DragValue, Ui};
 use glm::{inverse, vec3, Vec3};
 use nalgebra_glm as glm;
@@ -68,7 +66,7 @@ impl DataResponse<SceneResponse> for Scene {
 }
 
 // {{{ generate transformation UI functions
-macro_rules! generate_transformer_function {
+macro_rules! transform_ui_for {
 	($prop:ident) => {
 		paste::paste! {
 			fn [<transform_ $prop>](
@@ -216,25 +214,24 @@ impl Scene {
 			});
 
 			if changed {
-				self.recalculate_transforms();
+				self.recalc_transforms();
 			}
 		});
 	}
 	// }}}
 
-	generate_transformer_function!(pos);
-	generate_transformer_function!(rot);
-	generate_transformer_function!(scl);
+	transform_ui_for!(pos);
+	transform_ui_for!(rot);
+	transform_ui_for!(scl);
 
-	pub fn recalculate_transforms(&mut self) {
+	pub fn recalc_transforms(&mut self) {
 		for (i, mat) in self.transform_mats.iter_mut().enumerate() {
 			*mat = glm::identity();
-			// in reverse order because of right-multiplying
-			glm::rotate_x(mat, self.rot[i].x);
-			glm::rotate_y(mat, self.rot[i].y);
-			glm::rotate_z(mat, self.rot[i].z);
-			glm::scale(mat, &self.scl[i]);
-			glm::translate(mat, &self.pos[i]);
+			*mat = glm::translate(mat, &self.pos[i]);
+			*mat = glm::rotate_z(mat, self.rot[i].z);
+			*mat = glm::rotate_y(mat, self.rot[i].y);
+			*mat = glm::rotate_x(mat, self.rot[i].x);
+			*mat = glm::scale(mat, &self.scl[i]);
 			*mat = inverse(mat);
 		}
 	}

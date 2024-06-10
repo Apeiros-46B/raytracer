@@ -65,15 +65,21 @@ uniform usampler2D ray_directions;
 // }
 // }}}
 
-// {{{ intersection functions
-RayHit ray_sphere_intersection(Ray ray, Sphere sphere) {
-// RayHit ray_sphere_intersection(Ray ray, Sphere sphere, mat4 transform) {
-	// transform ray origin based on sphere position
-	vec3 origin = ray.origin - sphere.position;
-	// vec3 origin = vec3(transform * vec4(ray.origin, 1.0));
+vec3 transform(vec3 src, mat4 m) {
+	return vec3(m * vec4(src, 1.0));
+}
 
-	float a = dot(ray.direction, ray.direction);
-	float b = 2.0 * dot(origin, ray.direction);
+// {{{ intersection functions
+// RayHit ray_sphere_intersection(Ray ray, Sphere sphere) {
+RayHit ray_sphere_intersection(Ray ray, Sphere sphere, mat4 m) {
+	// transform ray origin based on sphere position
+	// vec3 origin = ray.origin - sphere.position;
+	// vec3 origin = ray.origin;
+	vec3 origin = transform(ray.origin, m);
+	vec3 direction = transform(ray.direction, m);
+
+	float a = dot(direction, direction);
+	float b = 2.0 * dot(origin, direction);
 	float c = dot(origin, origin) - sphere.radius * sphere.radius;
 	float discriminant = b * b - 4.0 * a * c;
 
@@ -101,14 +107,18 @@ void main() {
 		}
 
 		Sphere sp = Sphere(sphere_radii[i], sphere_pos[i]);
-		RayHit hit = ray_sphere_intersection(primary, sp);
-		// RayHit hit = ray_sphere_intersection(primary, sp, sphere_transform[i]);
+		mat4 m = sphere_transform[i];
+		// RayHit hit = ray_sphere_intersection(primary, sp);
+		RayHit hit = ray_sphere_intersection(primary, sp, m);
 
 		if (hit.hit) {
-		 	vec3 hit_pos = (primary.origin - sp.position) + primary.direction * hit.distance;
-		 	float light_fac = max(dot(normalize(hit_pos), sun_dir), 0.0);
-		 	light_fac *= sun_strength;
-			out_color = vec4(vec3(light_fac), 1);
+			mat4 im = inverse(m);
+			// vec3 hit_pos = transform(primary.origin + primary.direction * hit.distance, im);
+			// float light_fac = max(dot(normalize(hit_pos), transform(sun_dir, im)), 0.0);
+			// light_fac *= sun_strength;
+			// out_color = vec4(vec3(light_fac), 1);
+
+			out_color = vec4(1);
 
 			did_hit = true;
 			break;

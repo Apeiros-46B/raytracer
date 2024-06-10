@@ -7,7 +7,7 @@ use nalgebra_glm as glm;
 use crate::{
 	app::{PersistentData, RaytracingApp},
 	camera::Camera,
-	util::DataResponse,
+	util::{flatten_mats, DataResponse},
 };
 
 pub struct Raytracer {
@@ -351,14 +351,14 @@ impl Raytracer {
 
 			gl.uniform_3_f32_slice(
 				gl.get_uniform_location(self.program, "sphere_pos").as_ref(),
-				crate::util::flatten_mats(&data.scene.pos),
+				flatten_mats(&data.scene.pos),
 			);
 
 			gl.uniform_matrix_4_f32_slice(
 				gl.get_uniform_location(self.program, "sphere_transform")
 					.as_ref(),
-				false, // no transpose
-				crate::util::flatten_mats(&data.scene.transform_mats),
+				false, // no transpose, it's already in column-major order
+				flatten_mats(&data.scene.transform_mats),
 			);
 			// }}}
 
