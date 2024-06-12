@@ -113,12 +113,13 @@ void main() {
 
 		if (hit.hit) {
 			mat4 im = inverse(m);
-			// vec3 hit_pos = transform(primary.origin + primary.direction * hit.distance, im);
-			// float light_fac = max(dot(normalize(hit_pos), transform(sun_dir, im)), 0.0);
-			// light_fac *= sun_strength;
-			// out_color = vec4(vec3(light_fac), 1);
+			// TODO: this distance needs to be transformed somehow. Try moving the sphere in the Z direction and watch the normals get FUCKED UP -- 06.11 23:52
+			vec3 hit_pos = transform(primary.origin, m) + transform(primary.direction, m) * hit.distance;
+			float light_fac = max(dot(normalize(hit_pos), transform(sun_dir, im)), 0.0);
+			light_fac *= sun_strength;
+			out_color = vec4(vec3(light_fac), 1);
 
-			out_color = vec4(1);
+			// out_color = vec4(1);
 
 			did_hit = true;
 			break;
