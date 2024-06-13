@@ -1,9 +1,10 @@
 use egui::{DragValue, Ui};
-use glm::{inverse, vec3, Vec3};
+use glm::{vec3, Mat4, Vec3};
 use nalgebra_glm as glm;
 
 use crate::util::{modal, AngleControl, DataResponse};
 
+#[derive(Clone, Copy, bytemuck::NoUninit, serde::Serialize, serde::Deserialize)]
 #[repr(u32)]
 pub enum ObjectType {
 	Sphere,
@@ -14,11 +15,14 @@ pub enum ObjectType {
 pub struct Scene {
 	selected: usize,
 	pub names: Vec<String>,
-	pub radii: Vec<f32>,
+	pub types: Vec<ObjectType>,
 	pub pos: Vec<Vec3>,
 	pub rot: Vec<Vec3>,
 	pub scl: Vec<Vec3>,
-	pub transform_mats: Vec<glm::Mat4>,
+
+	pub transforms: Vec<Mat4>,
+	pub inv_transforms: Vec<Mat4>,
+	pub trans_transforms: Vec<Mat4>,
 
 	#[serde(skip)]
 	pub response: SceneResponse,
@@ -34,11 +38,13 @@ impl Default for Scene {
 		Self {
 			selected: 0,
 			names: vec!["Default sphere".to_string()],
-			radii: vec![0.5],
+			types: vec![ObjectType::Sphere],
 			pos: vec![vec3(0.0, 0.0, 0.0)],
 			rot: vec![vec3(0.0, 0.0, 0.0)],
 			scl: vec![vec3(1.0, 1.0, 1.0)],
-			transform_mats: vec![glm::identity()],
+			transforms: vec![glm::identity()],
+			inv_transforms: vec![glm::identity()],
+			trans_transforms: vec![glm::identity()],
 
 			response: Self::first_response(),
 
@@ -96,6 +102,10 @@ macro_rules! transform_ui_for {
 // }}}
 
 impl Scene {
+	pub fn len(&self) -> usize {
+		self.names.len()
+	}
+
 	pub fn window(&mut self, egui: &egui::Context) {
 		egui::Window::new("Scene")
 			.resizable(false)
@@ -225,14 +235,21 @@ impl Scene {
 	transform_ui_for!(scl);
 
 	pub fn recalc_transforms(&mut self) {
-		for (i, mat) in self.transform_mats.iter_mut().enumerate() {
-			*mat = glm::identity();
-			*mat = glm::translate(mat, &self.pos[i]);
-			*mat = glm::rotate_z(mat, self.rot[i].z);
-			*mat = glm::rotate_y(mat, self.rot[i].y);
-			*mat = glm::rotate_x(mat, self.rot[i].x);
-			*mat = glm::scale(mat, &self.scl[i]);
-			*mat = inverse(mat);
+		for (i, ((m, im), tm)) in (self.transforms.iter_mut())
+			.zip(self.inv_transforms.iter_mut())
+			.zip(self.trans_transforms.iter_mut())
+			.enumerate()
+		{
+			let mut mat = glm::identity();
+			mat = glm::translate(&mat, &self.pos[i]);
+			mat = glm::rotate_z(&mat, self.rot[i].z);
+			mat = glm::rotate_y(&mat, self.rot[i].y);
+			mat = glm::rotate_x(&mat, self.rot[i].x);
+			mat = glm::scale(&mat, &self.scl[i]);
+
+			*m = mat;
+			*im = glm::inverse(&mat);
+			*tm = glm::transpose(&mat);
 		}
 	}
 }

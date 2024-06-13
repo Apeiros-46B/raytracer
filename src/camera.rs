@@ -26,7 +26,7 @@ const UP_DIR: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const BASE_SPEED: f32 = 5.0;
 const BASE_ROT_SPEED: f32 = 0.005;
 
-const DEFAULT_POS: Vec3 = Vec3::new(0.0, 0.0, 2.0);
+const DEFAULT_POS: Vec3 = Vec3::new(0.0, 0.0, 3.0);
 const DEFAULT_FORWARD_DIR: Vec3 = Vec3::new(0.0, 0.0, -1.0);
 
 pub const DEFAULT_FOV_DEG: f32 = 70.0_f32;

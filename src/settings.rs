@@ -77,8 +77,9 @@ impl Default for RenderSettings {
 #[derive(Clone, Copy, Default)]
 pub struct SettingsResponse {
 	pub focused: bool,
-	pub clear_data: bool,
 	pub screenshot: bool,
+	pub save_data: bool,
+	pub clear_data: bool,
 	pub sun_angle_changed: bool,
 }
 
@@ -88,8 +89,9 @@ impl DataResponse<SettingsResponse> for Settings {
 		// but should NOT be recalculated every frame
 		SettingsResponse {
 			focused: false,
-			clear_data: false,
 			screenshot: false,
+			save_data: false,
+			clear_data: false,
 			sun_angle_changed: true,
 		}
 	}
@@ -197,6 +199,10 @@ impl Settings {
 
 				if ui.button("Temporarily hide windows").clicked() {
 					self.response.screenshot = true;
+				}
+
+				if ui.button("Manually save data").clicked() {
+					self.response.save_data = true;
 				}
 
 				// {{{ clear data button

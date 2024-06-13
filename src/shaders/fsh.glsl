@@ -2,8 +2,6 @@
 precision mediump float;
 precision mediump usampler2D;
 
-const int MAX_SPHERES = 50;
-
 out vec4 out_color;
 
 // {{{ typedefs
@@ -14,24 +12,25 @@ struct Ray {
 
 struct RayHit {
 	bool hit;
-	float distance;
-};
-
-struct Sphere {
-	float radius;
-	vec3 position;
+	vec3 pos;
+	vec3 norm;
+	float dist;
 };
 // }}}
+
+const vec3 TODO = vec3(0);
+const uint MAX_SPHERES = 50u;
+const RayHit NO_HIT = RayHit(false, vec3(0.0), vec3(0.0), 0.0);
 
 // {{{ uniforms
 uniform vec2 scr_size;
 uniform vec3 camera_pos;
 uniform uint frame_index;
 
-uniform uint sphere_count;
-uniform float sphere_radii[MAX_SPHERES];
-uniform vec3 sphere_pos[MAX_SPHERES];
-uniform mat4 sphere_transform[MAX_SPHERES];
+uniform uint scene_size;
+uniform mat4 scene_transforms[MAX_SPHERES];
+uniform mat4 scene_inv_transforms[MAX_SPHERES];
+uniform mat4 scene_trans_transforms[MAX_SPHERES];
 
 uniform vec3 sky_color;
 uniform vec3 sun_dir;
@@ -65,29 +64,52 @@ uniform usampler2D ray_directions;
 // }
 // }}}
 
-vec3 transform(vec3 src, mat4 m) {
+vec3 left_transform(vec3 src, mat4 m) {
 	return vec3(m * vec4(src, 1.0));
 }
 
+vec3 right_transform(vec3 src, mat4 m) {
+	return vec3(vec4(src, 1.0) * m);
+}
+
 // {{{ intersection functions
-// RayHit ray_sphere_intersection(Ray ray, Sphere sphere) {
-RayHit ray_sphere_intersection(Ray ray, Sphere sphere, mat4 m) {
-	// transform ray origin based on sphere position
-	// vec3 origin = ray.origin - sphere.position;
-	// vec3 origin = ray.origin;
-	vec3 origin = transform(ray.origin, m);
-	vec3 direction = transform(ray.direction, m);
+float ray_sphere_intersection(Ray ray, mat4 im) {
+	vec3 origin = left_transform(ray.origin, im);
+	vec3 direction = normalize(left_transform(ray.direction, im));
 
 	float a = dot(direction, direction);
 	float b = 2.0 * dot(origin, direction);
-	float c = dot(origin, origin) - sphere.radius * sphere.radius;
+	float c = dot(origin, origin) - 1; // 1 = radius^2 = 1^2 = 1
 	float discriminant = b * b - 4.0 * a * c;
 
 	if (discriminant >= 0.0) {
 		float t = (-b - sqrt(discriminant)) / (2.0 * a);
-		return RayHit(t >= 0.0, t);
+		if (t >= 0.0) {
+			return t;
+		} else {
+			return -1.0;
+		}
 	} else {
-		return RayHit(false, 0.0);
+		return -1.0;
+	}
+}
+// }}}
+
+// {{{ new intersection functions
+RayHit intersect_sphere(Ray ray, mat4 m, mat4 im, mat4 tm) {
+	vec3 origin = left_transform(ray.origin, im);
+	vec3 direction = normalize(left_transform(ray.direction, im));
+
+	float a = dot(direction, direction);
+	float b = 2.0 * dot(origin, direction);
+	float c = dot(origin, origin) - 1; // 1 = radius^2 = 1^2 = 1
+	float discriminant = b * b - 4.0 * a * c;
+
+	if (discriminant >= 0.0) {
+		float t = (-b - sqrt(discriminant)) / (2.0 * a);
+		return RayHit(t >= 0.0, TODO, TODO, t);
+	} else {
+		return NO_HIT;
 	}
 }
 // }}}
@@ -101,24 +123,36 @@ void main() {
 	Ray primary = Ray(camera_pos, current_ray_dir());
 	bool did_hit = false;
 
-	for (int i = 0; i < MAX_SPHERES; i++) {
-		if (i == int(sphere_count)) {
+	for (uint i = 0u; i < MAX_SPHERES; i++) {
+		if (i == scene_size) {
 			break;
 		}
 
-		Sphere sp = Sphere(sphere_radii[i], sphere_pos[i]);
-		mat4 m = sphere_transform[i];
-		// RayHit hit = ray_sphere_intersection(primary, sp);
-		RayHit hit = ray_sphere_intersection(primary, sp, m);
+		mat4 im = scene_inv_transforms[i];
+		float t = ray_sphere_intersection(primary, im);
 
-		if (hit.hit) {
-			mat4 im = inverse(m);
-			// TODO: this distance needs to be transformed somehow. Try moving the sphere in the Z direction and watch the normals get FUCKED UP -- 06.11 23:52
-			vec3 hit_pos = transform(primary.origin, m) + transform(primary.direction, m) * hit.distance;
-			float light_fac = max(dot(normalize(hit_pos), transform(sun_dir, im)), 0.0);
-			light_fac *= sun_strength;
-			out_color = vec4(vec3(light_fac), 1);
+		if (t != -1.0) {
+			mat4 m = scene_transforms[i];
+			mat4 tm = scene_trans_transforms[i];
 
+			// float hit_distance = length(left_transform(primary.direction * t, im));
+			// vec3 hit_pos = left_transform(primary.origin, im) + left_transform(primary.direction, im) * hit_distance;
+
+			// vec3 hit_pos = left_transform(primary.origin + primary.direction * t, im);
+
+			// vec3 hit_pos = left_transform(primary.origin, im) + left_transform(primary.direction, im) * t;
+
+			vec3 hit_pos = left_transform(primary.origin + primary.direction * t, tm);
+
+			// color
+			// float light_fac = max(dot(normalize(hit_pos), left_transform(sun_dir, im)), 0.0);
+			// light_fac *= sun_strength;
+			// out_color = vec4(vec3(light_fac), 1);
+
+			// normal
+			out_color = vec4(normalize(hit_pos), 1);
+
+			// white
 			// out_color = vec4(1);
 
 			did_hit = true;

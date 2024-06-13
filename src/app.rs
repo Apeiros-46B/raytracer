@@ -87,7 +87,7 @@ impl eframe::App for RaytracingApp {
 		eframe::set_value(storage, DATA_KEY, &*self.data.lock());
 	}
 
-	fn update(&mut self, egui: &egui::Context, _frame: &mut eframe::Frame) {
+	fn update(&mut self, egui: &egui::Context, frame: &mut eframe::Frame) {
 		let mut data = self.data.lock();
 
 		// {{{ draw windows
@@ -115,10 +115,15 @@ impl eframe::App for RaytracingApp {
 		if settings_response.clear_data {
 			*data = self.default_data.clone();
 		}
-		// }}}
 
-		// fixes error with simultaneous mutable borrow of self field when rendering
+		// fixes error with simultaneous mutable borrow of self field
 		drop(data);
+
+		// save data if requested
+		if settings_response.save_data {
+			self.save(frame.storage_mut().unwrap());
+		}
+		// }}}
 
 		// main painting
 		egui::CentralPanel::default().show(egui, |ui| {

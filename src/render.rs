@@ -338,27 +338,36 @@ impl Raytracer {
 
 			// {{{ scene
 			gl.uniform_1_u32(
-				gl.get_uniform_location(self.program, "sphere_count")
+				gl.get_uniform_location(self.program, "scene_size")
 					.as_ref(),
-				data.scene.radii.len().try_into().unwrap(),
+				data.scene.len().try_into().unwrap(),
 			);
 
-			gl.uniform_1_f32_slice(
-				gl.get_uniform_location(self.program, "sphere_radii")
+			gl.uniform_1_u32_slice(
+				gl.get_uniform_location(self.program, "scene_obj_types")
 					.as_ref(),
-				&data.scene.radii,
-			);
-
-			gl.uniform_3_f32_slice(
-				gl.get_uniform_location(self.program, "sphere_pos").as_ref(),
-				flatten_mats(&data.scene.pos),
+				bytemuck::cast_slice(&data.scene.types),
 			);
 
 			gl.uniform_matrix_4_f32_slice(
-				gl.get_uniform_location(self.program, "sphere_transform")
+				gl.get_uniform_location(self.program, "scene_transforms")
 					.as_ref(),
 				false, // no transpose, it's already in column-major order
-				flatten_mats(&data.scene.transform_mats),
+				flatten_mats(&data.scene.transforms),
+			);
+
+			gl.uniform_matrix_4_f32_slice(
+				gl.get_uniform_location(self.program, "scene_inv_transforms")
+					.as_ref(),
+				false, // no transpose, it's already in column-major order
+				flatten_mats(&data.scene.inv_transforms),
+			);
+
+			gl.uniform_matrix_4_f32_slice(
+				gl.get_uniform_location(self.program, "scene_trans_transforms")
+					.as_ref(),
+				false, // no transpose, it's already in column-major order
+				flatten_mats(&data.scene.inv_transforms),
 			);
 			// }}}
 
