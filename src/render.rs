@@ -7,15 +7,15 @@ use nalgebra_glm as glm;
 use crate::{
 	app::{PersistentData, RaytracingApp},
 	camera::Camera,
-	util::{flatten_mats, DataResponse},
+	util::{flatten_mats, Reset},
 };
 
 pub struct Raytracer {
 	// prepass calculates ray directions for each pixel when the screen size changes
-	prepass_fbo: glow::Framebuffer,
-	prepass_texture: glow::Texture,
-	prepass_program: Program,
-	prepass_verts: VertexArray,
+	ray_dirs_fbo: glow::Framebuffer,
+	ray_dirs_texture: glow::Texture,
+	ray_dirs_program: Program,
+	ray_dirs_verts: VertexArray,
 	program: Program,
 	verts: VertexArray,
 
@@ -104,8 +104,8 @@ impl RaytracingApp {
 					raytracer.paint(gl, &data);
 					raytracer.frame_index += 1;
 
-					// {{{ update camera
 					if !data.settings.render.lock_camera {
+						// {{{ update camera
 						let fov = data.settings.render.fov;
 						data.camera.set_fov(fov);
 						if !ui_focused && data.camera.update(input.clone()) {
@@ -114,14 +114,14 @@ impl RaytracingApp {
 							raytracer.frame_index = 0;
 						};
 						if data.camera.recalculate_ray_dirs {
-							raytracer.calculate_ray_directions(gl, &data.camera);
+							raytracer.calculate_ray_dirs(gl, &data.camera);
 							data.camera.recalculate_ray_dirs = false;
 						}
+						// }}}
 					}
-					// }}}
 
-					data.settings.reset_response();
-					data.scene.reset_response();
+					data.settings.response.reset();
+					data.scene.response.reset();
 				},
 			)),
 		};
@@ -197,10 +197,10 @@ impl Raytracer {
 			// }}}
 
 			let mut this = Self {
-				prepass_fbo,
-				prepass_texture,
-				prepass_program,
-				prepass_verts,
+				ray_dirs_fbo: prepass_fbo,
+				ray_dirs_texture: prepass_texture,
+				ray_dirs_program: prepass_program,
+				ray_dirs_verts: prepass_verts,
 				program,
 				verts,
 
@@ -208,7 +208,7 @@ impl Raytracer {
 				frame_index: 0,
 			};
 			// initial ray direction calculation
-			this.calculate_ray_directions(gl, camera);
+			this.calculate_ray_dirs(gl, camera);
 			this
 		}
 	}
@@ -216,10 +216,10 @@ impl Raytracer {
 	// {{{ clean up GL objects
 	pub fn destroy(&self, gl: &Context) {
 		unsafe {
-			gl.delete_framebuffer(self.prepass_fbo);
-			gl.delete_texture(self.prepass_texture);
-			gl.delete_program(self.prepass_program);
-			gl.delete_vertex_array(self.prepass_verts);
+			gl.delete_framebuffer(self.ray_dirs_fbo);
+			gl.delete_texture(self.ray_dirs_texture);
+			gl.delete_program(self.ray_dirs_program);
+			gl.delete_vertex_array(self.ray_dirs_verts);
 
 			gl.delete_program(self.program);
 			gl.delete_vertex_array(self.verts);
@@ -233,7 +233,7 @@ impl Raytracer {
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 			gl.use_program(Some(self.program));
 			self.apply_uniforms(gl, data);
-			gl.bind_texture(glow::TEXTURE_2D, Some(self.prepass_texture));
+			gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
 			gl.bind_vertex_array(Some(self.verts));
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
 			gl.bind_texture(glow::TEXTURE_2D, None);
@@ -257,7 +257,7 @@ impl Raytracer {
 
 		unsafe {
 			// resize ray directions texture
-			gl.bind_texture(glow::TEXTURE_2D, Some(self.prepass_texture));
+			gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
 			gl.tex_image_2d(
 				glow::TEXTURE_2D,
 				0,
@@ -275,36 +275,40 @@ impl Raytracer {
 	// }}}
 
 	// {{{ calculate ray directions
-	fn calculate_ray_directions(&mut self, gl: &Context, camera: &Camera) {
+	fn calculate_ray_dirs(&mut self, gl: &Context, camera: &Camera) {
 		unsafe {
-			gl.use_program(Some(self.prepass_program));
+			gl.use_program(Some(self.ray_dirs_program));
 
+			// bind uniforms for ray direction calculation
 			gl.uniform_2_f32(
-				gl.get_uniform_location(self.prepass_program, "scr_size")
+				gl.get_uniform_location(self.ray_dirs_program, "scr_size")
 					.as_ref(),
 				self.scr_size.x,
 				self.scr_size.y,
 			);
 			gl.uniform_matrix_4_f32_slice(
-				gl.get_uniform_location(self.prepass_program, "inv_proj")
+				gl.get_uniform_location(self.ray_dirs_program, "inv_proj")
 					.as_ref(),
 				false, // no transpose, it's already in column-major order
 				camera.inv_proj.as_slice(),
 			);
 			gl.uniform_matrix_4_f32_slice(
-				gl.get_uniform_location(self.prepass_program, "inv_view")
+				gl.get_uniform_location(self.ray_dirs_program, "inv_view")
 					.as_ref(),
 				false, // no transpose, it's already in column-major order
 				camera.inv_view.as_slice(),
 			);
 
-			gl.bind_vertex_array(Some(self.prepass_verts));
-			gl.bind_texture(glow::TEXTURE_2D, Some(self.prepass_texture));
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.prepass_fbo));
+			// draw into framebuffer
+			gl.bind_vertex_array(Some(self.ray_dirs_verts));
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.ray_dirs_fbo));
+			gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
 			gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
 			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
+			// unbind
+			gl.bind_vertex_array(None);
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 			gl.bind_texture(glow::TEXTURE_2D, None);
 			gl.use_program(Some(self.program));
@@ -336,40 +340,56 @@ impl Raytracer {
 			);
 			// }}}
 
-			// {{{ scene
-			gl.uniform_1_u32(
-				gl.get_uniform_location(self.program, "scene_size")
+			if self.frame_index == 0 || data.scene.response.changed {
+				// {{{ scene
+				gl.uniform_1_u32(
+					gl.get_uniform_location(self.program, "scene_size")
 					.as_ref(),
-				data.scene.len().try_into().unwrap(),
-			);
+					data.scene.len().try_into().unwrap(),
+				);
 
-			gl.uniform_1_u32_slice(
-				gl.get_uniform_location(self.program, "scene_obj_types")
+				gl.uniform_1_u32_slice(
+					gl.get_uniform_location(self.program, "scene_obj_types")
 					.as_ref(),
-				bytemuck::cast_slice(&data.scene.types),
-			);
+					bytemuck::cast_slice(&data.scene.types),
+				);
 
-			gl.uniform_matrix_4_f32_slice(
-				gl.get_uniform_location(self.program, "scene_transforms")
+				gl.uniform_matrix_4_f32_slice(
+					gl.get_uniform_location(self.program, "scene_transforms")
 					.as_ref(),
-				false, // no transpose, it's already in column-major order
-				flatten_mats(&data.scene.transforms),
-			);
+					false, // no transpose, it's already in column-major order
+					flatten_mats(&data.scene.transforms),
+				);
 
-			gl.uniform_matrix_4_f32_slice(
-				gl.get_uniform_location(self.program, "scene_inv_transforms")
+				gl.uniform_matrix_4_f32_slice(
+					gl.get_uniform_location(self.program, "scene_inv_transforms")
 					.as_ref(),
-				false, // no transpose, it's already in column-major order
-				flatten_mats(&data.scene.inv_transforms),
-			);
+					false, // no transpose, it's already in column-major order
+					flatten_mats(&data.scene.inv_transforms),
+				);
 
-			gl.uniform_matrix_4_f32_slice(
-				gl.get_uniform_location(self.program, "scene_trans_transforms")
+				gl.uniform_matrix_4_f32_slice(
+					gl.get_uniform_location(self.program, "scene_trans_transforms")
 					.as_ref(),
-				false, // no transpose, it's already in column-major order
-				flatten_mats(&data.scene.inv_transforms),
-			);
-			// }}}
+					false, // no transpose, it's already in column-major order
+					flatten_mats(&data.scene.inv_transforms),
+				);
+
+				gl.uniform_matrix_4_f32_slice(
+					gl.get_uniform_location(self.program, "scene_rot_transforms")
+					.as_ref(),
+					false, // no transpose, it's already in column-major order
+					flatten_mats(&data.scene.rot_transforms),
+				);
+
+				gl.uniform_matrix_4_f32_slice(
+					gl.get_uniform_location(self.program, "scene_inv_rot_transforms")
+					.as_ref(),
+					false, // no transpose, it's already in column-major order
+					flatten_mats(&data.scene.inv_rot_transforms),
+				);
+				// }}}
+			}
 
 			// {{{ world settings
 			// sky color
@@ -381,7 +401,7 @@ impl Raytracer {
 			);
 
 			// sun direction
-			if data.settings.response.sun_angle_changed {
+			if self.frame_index == 0 || data.settings.response.sun_angle_changed {
 				let beta_cos = data.settings.world.sun_elevation.cos();
 				let x = data.settings.world.sun_rotation.cos() * beta_cos;
 				let y = data.settings.world.sun_elevation.sin();

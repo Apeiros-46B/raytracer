@@ -1,10 +1,12 @@
 use egui::{DragValue, Ui};
-use glm::{vec3, Mat4, Vec3};
+use glm::{inverse, vec3, Mat4, Vec3};
 use nalgebra_glm as glm;
 
-use crate::util::{modal, AngleControl, DataResponse};
+use crate::util::{modal, AngleControl, Reset};
 
-#[derive(Clone, Copy, bytemuck::NoUninit, serde::Serialize, serde::Deserialize)]
+#[derive(
+	Clone, Copy, bytemuck::NoUninit, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u32)]
 pub enum ObjectType {
 	Sphere,
@@ -23,6 +25,8 @@ pub struct Scene {
 	pub transforms: Vec<Mat4>,
 	pub inv_transforms: Vec<Mat4>,
 	pub trans_transforms: Vec<Mat4>,
+	pub rot_transforms: Vec<Mat4>,
+	pub inv_rot_transforms: Vec<Mat4>,
 
 	#[serde(skip)]
 	pub response: SceneResponse,
@@ -45,8 +49,10 @@ impl Default for Scene {
 			transforms: vec![glm::identity()],
 			inv_transforms: vec![glm::identity()],
 			trans_transforms: vec![glm::identity()],
+			rot_transforms: vec![glm::identity()],
+			inv_rot_transforms: vec![glm::identity()],
 
-			response: Self::first_response(),
+			response: SceneResponse::default(),
 
 			rename_modal: false,
 			delete_modal: false,
@@ -59,17 +65,9 @@ impl Default for Scene {
 #[derive(Clone, Copy, Default)]
 pub struct SceneResponse {
 	pub focused: bool,
+	pub changed: bool,
 }
-
-impl DataResponse<SceneResponse> for Scene {
-	fn first_response() -> SceneResponse {
-		SceneResponse::default()
-	}
-
-	fn reset_response(&mut self) {
-		self.response = SceneResponse::default();
-	}
-}
+impl Reset for SceneResponse {}
 
 // {{{ generate transformation UI functions
 macro_rules! transform_ui_for {
@@ -235,21 +233,24 @@ impl Scene {
 	transform_ui_for!(scl);
 
 	pub fn recalc_transforms(&mut self) {
-		for (i, ((m, im), tm)) in (self.transforms.iter_mut())
-			.zip(self.inv_transforms.iter_mut())
-			.zip(self.trans_transforms.iter_mut())
-			.enumerate()
-		{
+		for i in 0..self.len() {
+			let mut rot_mat = glm::identity();
+			rot_mat = glm::rotate_z(&rot_mat, self.rot[i].z);
+			rot_mat = glm::rotate_y(&rot_mat, self.rot[i].y);
+			rot_mat = glm::rotate_x(&rot_mat, self.rot[i].x);
+
 			let mut mat = glm::identity();
 			mat = glm::translate(&mat, &self.pos[i]);
-			mat = glm::rotate_z(&mat, self.rot[i].z);
-			mat = glm::rotate_y(&mat, self.rot[i].y);
-			mat = glm::rotate_x(&mat, self.rot[i].x);
+			mat *= rot_mat;
 			mat = glm::scale(&mat, &self.scl[i]);
 
-			*m = mat;
-			*im = glm::inverse(&mat);
-			*tm = glm::transpose(&mat);
+			self.transforms[i] = mat;
+			self.inv_transforms[i] = inverse(&mat);
+			self.trans_transforms[i] = glm::transpose(&mat);
+			self.rot_transforms[i] = rot_mat;
+			self.inv_rot_transforms[i] = glm::transpose(&rot_mat);
 		}
+
+		self.response.changed = true;
 	}
 }

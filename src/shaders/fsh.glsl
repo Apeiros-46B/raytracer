@@ -7,20 +7,30 @@ out vec4 out_color;
 // {{{ typedefs
 struct Ray {
 	vec3 origin;
-	vec3 direction;
+	vec3 dir;
 };
 
 struct RayHit {
 	bool hit;
 	vec3 pos;
-	vec3 norm;
-	float dist;
+	vec3 normal;
+	float distance;
 };
+
+// new ver
+// struct RayHit {
+// 	bool hit;
+// 	vec3 normal;
+// 	float dist_near;
+// 	float dist_far;
+// };
 // }}}
 
+const mat4 ID = mat4(1.0);
 const vec3 TODO = vec3(0);
-const uint MAX_SPHERES = 50u;
-const RayHit NO_HIT = RayHit(false, vec3(0.0), vec3(0.0), 0.0);
+const uint MAX_SCENE_SIZE = 50u;
+const RayHit NO_HIT = RayHit(false, vec3(0.0), vec3(0.0), -1.0);
+// const RayHit NO_HIT = RayHit(false, vec3(0.0), -1.0, -1.0);
 
 // {{{ uniforms
 uniform vec2 scr_size;
@@ -28,9 +38,11 @@ uniform vec3 camera_pos;
 uniform uint frame_index;
 
 uniform uint scene_size;
-uniform mat4 scene_transforms[MAX_SPHERES];
-uniform mat4 scene_inv_transforms[MAX_SPHERES];
-uniform mat4 scene_trans_transforms[MAX_SPHERES];
+uniform mat4 scene_transforms[MAX_SCENE_SIZE];
+uniform mat4 scene_inv_transforms[MAX_SCENE_SIZE];
+uniform mat4 scene_trans_transforms[MAX_SCENE_SIZE];
+uniform mat4 scene_rot_transforms[MAX_SCENE_SIZE];
+uniform mat4 scene_inv_rot_transforms[MAX_SCENE_SIZE];
 
 uniform vec3 sky_color;
 uniform vec3 sun_dir;
@@ -39,7 +51,7 @@ uniform float sun_strength;
 uniform uint max_bounces;
 
 // passed as a texture from our prepass shader
-uniform usampler2D ray_directions;
+uniform usampler2D ray_dirs;
 // }}}
 
 // {{{ random number generation, use later for diffuse scattering
@@ -64,21 +76,18 @@ uniform usampler2D ray_directions;
 // }
 // }}}
 
-vec3 left_transform(vec3 src, mat4 m) {
+// translate a vec3 by a mat4, mat multiplied on the left
+vec3 ltrans(vec3 src, mat4 m) {
 	return vec3(m * vec4(src, 1.0));
-}
-
-vec3 right_transform(vec3 src, mat4 m) {
-	return vec3(vec4(src, 1.0) * m);
 }
 
 // {{{ intersection functions
 float ray_sphere_intersection(Ray ray, mat4 im) {
-	vec3 origin = left_transform(ray.origin, im);
-	vec3 direction = normalize(left_transform(ray.direction, im));
+	vec3 origin = ltrans(ray.origin, im);
+	vec3 dir = normalize(ltrans(ray.dir, im));
 
-	float a = dot(direction, direction);
-	float b = 2.0 * dot(origin, direction);
+	float a = dot(dir, dir);
+	float b = 2.0 * dot(origin, dir);
 	float c = dot(origin, origin) - 1; // 1 = radius^2 = 1^2 = 1
 	float discriminant = b * b - 4.0 * a * c;
 
@@ -96,71 +105,118 @@ float ray_sphere_intersection(Ray ray, mat4 im) {
 // }}}
 
 // {{{ new intersection functions
-RayHit intersect_sphere(Ray ray, mat4 m, mat4 im, mat4 tm) {
-	vec3 origin = left_transform(ray.origin, im);
-	vec3 direction = normalize(left_transform(ray.direction, im));
+// adapted from https://medium.com/@bromanz/another-view-on-the-classic-ray-aabb-intersection-algorithm-for-bvh-traversal-41125138b525
+bool intersect_aabb(Ray ray, vec3 corner0, vec3 corner1) {
+	vec3 inv = 1.0 / ray.dir;
+	vec3 t0 = (corner0 - ray.origin) * inv;
+	vec3 t1 = (corner1 - ray.origin) * inv;
+	vec3 tmin = min(t0, t1);
+	vec3 tmax = max(t0, t1);
 
-	float a = dot(direction, direction);
-	float b = 2.0 * dot(origin, direction);
+	float min_component = max(tmin.x, max(tmin.y, tmin.z));
+	float max_component = min(tmax.x, min(tmax.y, tmax.z));
+
+	return (min_component <= max_component);
+}
+
+// adapted from The Cherno's series
+RayHit intersect_sph(Ray ray, mat4 m, mat4 im, mat4 tm) {
+	vec3 origin = ltrans(ray.origin, im);
+	vec3 dir = normalize(ltrans(ray.dir, im));
+
+	// quadratic formula coefficients
+	// a is dot(dir, dir) which is 1
+	float b = 2.0 * dot(origin, dir);
 	float c = dot(origin, origin) - 1; // 1 = radius^2 = 1^2 = 1
-	float discriminant = b * b - 4.0 * a * c;
+	float discrim = b * b - 4.0 * c;
 
-	if (discriminant >= 0.0) {
-		float t = (-b - sqrt(discriminant)) / (2.0 * a);
-		return RayHit(t >= 0.0, TODO, TODO, t);
-	} else {
-		return NO_HIT;
-	}
+	if (discrim < 0.0) return NO_HIT;
+
+	float t = (-b - sqrt(discrim)) / 2.0;
+
+	return RayHit(t > 0.0, TODO, TODO, t);
+}
+
+// adapted from https://iquilezles.org/articles/intersectors/
+RayHit intersect_box(Ray ray, uint i) {
+	mat4 m = scene_transforms[i];
+	mat4 im = scene_inv_transforms[i];
+	mat4 rm = scene_rot_transforms[i];
+
+	vec3 origin = ltrans(ray.origin, im);
+	vec3 dir = normalize(ltrans(ray.dir, im));
+	vec3 inv = 1.0 / dir;
+
+	vec3 n = inv * origin;
+	vec3 k = abs(inv); // box size is (1, 1, 1); no need to multiply it
+	vec3 t1 = -n - k;
+	vec3 t2 = -n + k;
+
+	float t_near = max(max(t1.x, t1.y), t1.z);
+	float t_far = min(min(t2.x, t2.y), t2.z);
+
+	if (t_near > t_far || t_far < 0.0) return NO_HIT;
+
+	vec3 pos = ltrans(origin + dir * t_near, m);
+	vec3 normal = step(vec3(t_near), t1) * -sign(dir);
+	normal = ltrans(normal, rm);
+
+	// TODO: transform t_near
+	return RayHit(t_near > 0.0, pos, normal, t_near);
 }
 // }}}
 
-vec3 current_ray_dir() {
-	uvec3 texel = texture(ray_directions, gl_FragCoord.xy / scr_size).rgb;
-	return vec3(uintBitsToFloat(texel));
+Ray primary_ray_for_cur_pixel() {
+	uvec3 texel = texture(ray_dirs, gl_FragCoord.xy / scr_size).rgb;
+	return Ray(camera_pos, vec3(uintBitsToFloat(texel)));
 }
 
 void main() {
-	Ray primary = Ray(camera_pos, current_ray_dir());
-	bool did_hit = false;
-
-	for (uint i = 0u; i < MAX_SPHERES; i++) {
-		if (i == scene_size) {
-			break;
-		}
-
-		mat4 im = scene_inv_transforms[i];
-		float t = ray_sphere_intersection(primary, im);
-
-		if (t != -1.0) {
-			mat4 m = scene_transforms[i];
-			mat4 tm = scene_trans_transforms[i];
-
-			// float hit_distance = length(left_transform(primary.direction * t, im));
-			// vec3 hit_pos = left_transform(primary.origin, im) + left_transform(primary.direction, im) * hit_distance;
-
-			// vec3 hit_pos = left_transform(primary.origin + primary.direction * t, im);
-
-			// vec3 hit_pos = left_transform(primary.origin, im) + left_transform(primary.direction, im) * t;
-
-			vec3 hit_pos = left_transform(primary.origin + primary.direction * t, tm);
-
-			// color
-			// float light_fac = max(dot(normalize(hit_pos), left_transform(sun_dir, im)), 0.0);
-			// light_fac *= sun_strength;
-			// out_color = vec4(vec3(light_fac), 1);
-
-			// normal
-			out_color = vec4(normalize(hit_pos), 1);
-
-			// white
-			// out_color = vec4(1);
-
-			did_hit = true;
-			break;
-		}
+	Ray primary = primary_ray_for_cur_pixel();
+	RayHit hit = intersect_box(primary, 0u);
+	if (hit.hit) {
+		// out_color = vec4(hit.normal, 1);
+		float light_fac = max(dot(hit.normal, sun_dir), 0.0);
+		light_fac *= sun_strength;
+		out_color = vec4(vec3(light_fac), 1);
+	} else {
+		out_color = vec4(sky_color, 1);
 	}
 
-	if (!did_hit) {
-		out_color = vec4(0, 0, 0, 1);
-	}
+	// bool did_hit = false;
+
+	// for (uint i = 0u; i < MAX_SCENE_SIZE; i++) {
+	// 	if (i == scene_size) {
+	// 		break;
+	// 	}
+
+	// 	mat4 im = scene_inv_transforms[i];
+	// 	float t = ray_sphere_intersection(primary, im);
+
+	// 	if (t != -1.0) {
+	// 		mat4 m = scene_transforms[i];
+	// 		mat4 tm = scene_trans_transforms[i];
+
+	// 		// TODO: transforms for normals not working
+	// 		vec3 hit_pos = ltrans(primary.origin + primary.dir * t, tm);
+
+	// 		// color
+	// 		// float light_fac = max(dot(normalize(hit_pos), ltrans(sun_dir, im)), 0.0);
+	// 		// light_fac *= sun_strength;
+	// 		// out_color = vec4(vec3(light_fac), 1);
+
+	// 		// normal
+	// 		out_color = vec4(normalize(hit_pos), 1);
+
+	// 		// white
+	// 		// out_color = vec4(1);
+
+	// 		did_hit = true;
+	// 		break;
+	// 	}
+	// }
+
+	// if (!did_hit) {
+	// 	out_color = vec4(sky_color, 1);
+	// }
 }

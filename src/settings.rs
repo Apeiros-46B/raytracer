@@ -1,8 +1,8 @@
 use egui::Slider;
 
-use crate::util::{AngleControl, DataResponse};
+use crate::util::{AngleControl, Reset};
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Settings {
 	pub world: WorldSettings,
@@ -13,17 +13,6 @@ pub struct Settings {
 
 	#[serde(skip)]
 	data_modal: bool,
-}
-
-impl Default for Settings {
-	fn default() -> Self {
-		Self {
-			world: WorldSettings::default(),
-			render: RenderSettings::default(),
-			response: Self::first_response(),
-			data_modal: false,
-		}
-	}
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -82,24 +71,7 @@ pub struct SettingsResponse {
 	pub clear_data: bool,
 	pub sun_angle_changed: bool,
 }
-
-impl DataResponse<SettingsResponse> for Settings {
-	fn first_response() -> SettingsResponse {
-		// sun angle needs to be calculated once first
-		// but should NOT be recalculated every frame
-		SettingsResponse {
-			focused: false,
-			screenshot: false,
-			save_data: false,
-			clear_data: false,
-			sun_angle_changed: true,
-		}
-	}
-
-	fn reset_response(&mut self) {
-		self.response = SettingsResponse::default();
-	}
-}
+impl Reset for SettingsResponse {}
 
 impl Settings {
 	pub fn window(&mut self, egui: &egui::Context, frame_index: u32) {

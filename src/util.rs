@@ -85,8 +85,8 @@ pub fn flatten_mats<T, const R: usize, const C: usize>(
 	}
 }
 
-// "responses," see SettingsResponse and SceneResponse
-pub trait DataResponse<T> {
-	fn first_response() -> T;
-	fn reset_response(&mut self);
+pub trait Reset {
+	fn reset(&mut self) where Self: Default {
+		*self = Self::default();
+	}
 }
