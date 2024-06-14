@@ -13,6 +13,7 @@ struct Ray {
 
 struct RayHit {
 	bool hit;
+	uint obj;
 	vec3 pos;
 	vec3 normal;
 	float distance;
@@ -27,6 +28,11 @@ const uint RENDER_DEPTH     = 4u;
 const uint OBJ_TYPE_SPHERE = 0u;
 const uint OBJ_TYPE_BOX    = 1u;
 // }}}
+
+// 0x7f7f_fff = 0b0_11111110_11111111111111111111111 = 2139095039
+const float MAX_FLOAT = intBitsToFloat(2139095039);
+const uint MAX_SCENE_SIZE = 50u;
+const RayHit NO_HIT = RayHit(false, 0u, vec3(0.0), vec3(0.0), MAX_FLOAT);
 
 uniform vec2 scr_size;
 uniform vec3 camera_pos;
@@ -58,6 +64,18 @@ uniform float sun_strength;
 // world
 uniform uint render_mode;
 uniform uint max_bounces;
+// }}}
+
+// {{{ randomness
+// uint pcg_hash(uint input) {
+// 	uint state = input * 747796405u + 2891336453u;
+// 	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+// 	return (word >> 22u) ^ word;
+// }
+
+float rand_float(vec2 uv) {
+	return fract(sin(dot(uv, vec2(12.9898,78.233))) * 43758.5453123);
+}
 // }}}
 
 // translate a vec3 by a mat4, mat multiplied on the left
@@ -135,7 +153,7 @@ RayHit intersect_sph(Ray ray, uint i) {
 		scene_normal_transforms[i]
 	);
 
-	return RayHit(t > 0.0, pos, normal, tt);
+	return RayHit(true, i, pos, normal, tt);
 	// }}}
 }
 
@@ -155,7 +173,7 @@ RayHit intersect_box(Ray ray, uint i) {
 	float tn = max(max(t1.x, t1.y), t1.z);
 	float tf = min(min(t2.x, t2.y), t2.z);
 
-	if (tn > tf || tf < 0.0) return NO_HIT;
+	if (tn > tf || tf < 0.0 || tn < 0.0) return NO_HIT;
 
 	vec3 pos = pos_from_ray(ray, tn, scene_transforms[i]);
 	vec3 normal = transform_n(
@@ -164,36 +182,45 @@ RayHit intersect_box(Ray ray, uint i) {
 	);
 	float t = distance(orig_origin, pos); // transformed
 
-	return RayHit(tn > 0.0, pos, normal, t);
+	return RayHit(true, i, pos, normal, t);
 	// }}}
 }
 // }}}
 
-Ray primary_ray_for_cur_pixel() {
-	uvec3 texel = texture(ray_dirs, gl_FragCoord.xy / scr_size).rgb;
-	return Ray(camera_pos, vec3(uintBitsToFloat(texel)));
-}
-
-RayHit get_intersection(Ray primary, uint i) {
+RayHit intersect_obj(Ray ray, uint i) {
 	switch (scene_obj_types[i]) {
 		case OBJ_TYPE_SPHERE:
-			return intersect_sph(primary, i);
+			return intersect_sph(ray, i);
 		case OBJ_TYPE_BOX:
-			return intersect_box(primary, i);
+			return intersect_box(ray, i);
 	}
 }
 
-vec3 path_trace(RayHit hit, uint i) {
+RayHit intersect_world(Ray ray) {
+	RayHit hit = NO_HIT;
+	for (uint i = 0u; i < MAX_SCENE_SIZE; i++) {
+		if (scene_size == i) {
+			break;
+		}
+		RayHit new_hit = intersect_obj(ray, i);
+		if (hit.distance > new_hit.distance) {
+			hit = new_hit;
+		}
+	}
+	return hit;
+}
+
+vec3 path_trace(RayHit hit) {
 	// TODO
 	return vec3(1);
 }
 
-vec3 get_color(RayHit hit, uint i) {
+vec3 get_color(RayHit hit) {
 	if (hit.hit) {
 		switch (render_mode) {
 			case RENDER_PREVIEW:
 				float light_fac = clamp(dot(hit.normal, sun_dir) * sun_strength, 0.2, 1.0);
-				return scene_obj_mat_colors[i] * light_fac;
+				return scene_obj_mat_colors[hit.obj] * light_fac;
 			case RENDER_REALISTIC:
 				return path_trace(hit, i);
 			case RENDER_POSITION:
@@ -208,10 +235,19 @@ vec3 get_color(RayHit hit, uint i) {
 	}
 }
 
+Ray primary_ray(vec2 uv) {
+	uvec3 texel = texture(ray_dirs, uv).rgb;
+	return Ray(camera_pos, vec3(uintBitsToFloat(texel)));
+}
+
 void main() {
+	vec2 uv = gl_FragCoord.xy / scr_size;
+
 	uint i = 0u;
-	Ray primary = primary_ray_for_cur_pixel();
-	RayHit hit = get_intersection(primary, i);
-	vec3 color = pow(get_color(hit, i), vec3(1.0 / 2.2));
+	Ray primary = primary_ray(uv);
+	RayHit hit = intersect_world(primary);
+	vec3 color = pow(get_color(hit), vec3(1.0 / 2.2))
 	out_color = vec4(color, 1.0);
+
+	// out_color = vec4(vec3(rand_float(uv)), 1.0);
 }

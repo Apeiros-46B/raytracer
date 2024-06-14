@@ -348,14 +348,13 @@ impl Raytracer {
 				// {{{ scene
 				// TODO: these aren't always 50 long which causes an error
 				gl.uniform_1_u32(
-					gl.get_uniform_location(self.program, "scene_size")
-					.as_ref(),
+					gl.get_uniform_location(self.program, "scene_size").as_ref(),
 					data.scene.len().try_into().unwrap(),
 				);
 
 				gl.uniform_1_u32_slice(
 					gl.get_uniform_location(self.program, "scene_obj_types")
-					.as_ref(),
+						.as_ref(),
 					&fill_50(bytemuck::cast_slice(&data.scene.types)),
 				);
 
@@ -373,21 +372,21 @@ impl Raytracer {
 
 				gl.uniform_matrix_4_f32_slice(
 					gl.get_uniform_location(self.program, "scene_transforms")
-					.as_ref(),
+						.as_ref(),
 					false, // no transpose, it's already in column-major order
 					flatten_mats(&fill_50(&data.scene.transforms)),
 				);
 
 				gl.uniform_matrix_4_f32_slice(
 					gl.get_uniform_location(self.program, "scene_inv_transforms")
-					.as_ref(),
+						.as_ref(),
 					false, // no transpose, it's already in column-major order
 					flatten_mats(&fill_50(&data.scene.inv_transforms)),
 				);
 
 				gl.uniform_matrix_4_f32_slice(
 					gl.get_uniform_location(self.program, "scene_normal_transforms")
-					.as_ref(),
+						.as_ref(),
 					false, // no transpose, it's already in column-major order
 					flatten_mats(&fill_50(&data.scene.normal_transforms)),
 				);
