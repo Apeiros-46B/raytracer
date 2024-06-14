@@ -1,9 +1,6 @@
-use std::fmt::Display;
-
 use egui::{ComboBox, Slider};
 
 use crate::{
-	selectable_values,
 	util::{AngleControl, Reset, UpdateResponse},
 };
 
@@ -79,7 +76,7 @@ pub enum RenderMode {
 	Depth     = 4,
 }
 
-impl Display for RenderMode {
+impl std::fmt::Display for RenderMode {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			Self::Preview => write!(f, "Preview shading"),
@@ -161,13 +158,13 @@ impl Settings {
 				// {{{ render settings
 				ui.collapsing("Render settings", |ui| {
 					ui.horizontal(|ui| {
-						ui.label("Render mode");
+						ui.label("Render mode:");
 						// {{{ select render mode
 						ComboBox::new("render_mode_selector", "")
 							.selected_text(format!("{}", self.render.mode))
 							.show_ui(
 								ui,
-								selectable_values! {
+								crate::selectable_values! {
 									target = self.render.mode,
 									focused = self.response.focused,
 									clicked = self.response.changed,

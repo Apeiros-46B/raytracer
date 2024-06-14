@@ -2,15 +2,21 @@ use egui::{DragValue, Slider, Ui};
 use glm::{identity, inverse, vec3, Mat4, Vec3};
 use nalgebra_glm as glm;
 
-use crate::util::{modal, AngleControl, Reset, UpdateResponse};
+use crate::{selectable_values, util::{modal, AngleControl, Reset, UpdateResponse}};
 
 #[derive(
-	Clone, Copy, Debug, bytemuck::NoUninit, serde::Serialize, serde::Deserialize,
+	Clone, Copy, Debug, PartialEq, Eq, bytemuck::NoUninit, serde::Serialize, serde::Deserialize,
 )]
 #[repr(u32)]
 pub enum ObjectType {
 	Sphere = 0,
 	Box = 1,
+}
+
+impl std::fmt::Display for ObjectType {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+	  write!(f, "{self:?}")
+	}
 }
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -94,6 +100,8 @@ impl Scene {
 				self.object_management_interface(ui, modal_open);
 
 				if self.len() > 0 {
+					ui.separator();
+					self.object_type_menu(ui);
 					self.object_renaming_button(egui, ui, modal_open);
 					self.object_deletion_button(egui, ui, modal_open);
 					self.transformation_interface(ui);
@@ -128,6 +136,25 @@ impl Scene {
 			self.new_object();
 			self.set_changed(true);
 		}
+	}
+	// }}}
+
+	// {{{ setting type
+	fn object_type_menu(&mut self, ui: &mut Ui) {
+		ui.horizontal(|ui| {
+			ui.label("Object type:");
+			egui::ComboBox::new("scene_object_type_selector", "")
+				.selected_text(format!("{:?}", self.types[self.selected]))
+				.show_ui(ui, selectable_values! {
+					target = self.types[self.selected],
+					focused = self.response.focused,
+					clicked = self.response.changed,
+					[
+						ObjectType::Sphere,
+						ObjectType::Box,
+					]
+				});
+		});
 	}
 	// }}}
 

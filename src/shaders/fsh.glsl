@@ -31,8 +31,6 @@ const uint OBJ_TYPE_BOX    = 1u;
 
 // 0x7f7f_fff = 0b0_11111110_11111111111111111111111 = 2139095039
 const float MAX_FLOAT = intBitsToFloat(2139095039);
-const uint MAX_SCENE_SIZE = 50u;
-const RayHit NO_HIT = RayHit(false, 0u, vec3(0.0), vec3(0.0), MAX_FLOAT);
 
 uniform vec2 scr_size;
 uniform vec3 camera_pos;
@@ -108,7 +106,7 @@ vec3 pos_from_ray(Ray ray, float t, mat4 m) {
 }
 
 // {{{ intersection functions
-const RayHit NO_HIT = RayHit(false, vec3(0.0), vec3(0.0), -1.0);
+const RayHit NO_HIT = RayHit(false, 0u, vec3(0.0), vec3(0.0), MAX_FLOAT);
 
 // adapted from https://medium.com/@bromanz/another-view-on-the-classic-ray-aabb-intersection-algorithm-for-bvh-traversal-41125138b525
 bool intersect_aabb(Ray ray, vec3 corner0, vec3 corner1) {
@@ -127,33 +125,35 @@ bool intersect_aabb(Ray ray, vec3 corner0, vec3 corner1) {
 }
 
 // adapted from The Cherno's series
-RayHit intersect_sph(Ray ray, uint i) {
+RayHit intersect_sphere(Ray ray, uint i) {
 	// {{{
 	vec3 orig_origin = ray.origin;
 	vec3 orig_dir = ray.dir;
-	ray = transform(ray, scene_inv_transforms[i]);
+	Ray local_ray = transform(ray, scene_inv_transforms[i]);
 
 	// quadratic formula
 	// a is dot(dir, dir) which is 1 because dir is normalized
 	// (dot product of two identical normalized vecs is 1)
 	// b would have a factor of 2 but it cancels with qf denominator
-	float b = dot(ray.origin, ray.dir);
-	float c = dot(ray.origin, ray.origin) - 1.0; // 1 = radius^2 = 1^2 = 1
+	// c has a sub1 because radius^2 = 1^2 = 1
+	float b = dot(local_ray.origin, local_ray.dir);
+	float c = dot(local_ray.origin, local_ray.origin) - 1.0;
 
 	float d = b * b - c;
 	if (d < 0.0) return NO_HIT;
 
-	float t = (-b - sqrt(d));
-	if (t < 0.0) return NO_HIT;
+	float local_dist = (-b - sqrt(d));
+	if (local_dist < 0.0) return NO_HIT;
 
-	vec3 pos = pos_from_ray(ray, t, scene_transforms[i]);
-	float tt = distance(orig_origin, pos); // transformed
-	vec3 normal = transform(
-		orig_origin - pos_from_transform(scene_transforms[i]),
-		scene_normal_transforms[i]
-	);
+	vec3 world_pos = pos_from_ray(local_ray, local_dist, scene_transforms[i]);
+	float world_dist = distance(orig_origin, world_pos);
+	// TODO: this STILL doesn't work properly
+	vec3 normal = //transform(
+		normalize(world_pos - pos_from_transform(scene_transforms[i]));
+		// scene_normal_transforms[i]
+	// );
 
-	return RayHit(true, i, pos, normal, tt);
+	return RayHit(true, i, world_pos, normal, world_dist);
 	// }}}
 }
 
@@ -190,7 +190,7 @@ RayHit intersect_box(Ray ray, uint i) {
 RayHit intersect_obj(Ray ray, uint i) {
 	switch (scene_obj_types[i]) {
 		case OBJ_TYPE_SPHERE:
-			return intersect_sph(ray, i);
+			return intersect_sphere(ray, i);
 		case OBJ_TYPE_BOX:
 			return intersect_box(ray, i);
 	}
@@ -219,10 +219,10 @@ vec3 get_color(RayHit hit) {
 	if (hit.hit) {
 		switch (render_mode) {
 			case RENDER_PREVIEW:
-				float light_fac = clamp(dot(hit.normal, sun_dir) * sun_strength, 0.2, 1.0);
+				float light_fac = clamp(dot(hit.normal, sun_dir) * sun_strength, 0.05, 1.0);
 				return scene_obj_mat_colors[hit.obj] * light_fac;
 			case RENDER_REALISTIC:
-				return path_trace(hit, i);
+				return path_trace(hit);
 			case RENDER_POSITION:
 				return hit.pos / 2.0 + 0.5;
 			case RENDER_NORMAL:
@@ -246,7 +246,7 @@ void main() {
 	uint i = 0u;
 	Ray primary = primary_ray(uv);
 	RayHit hit = intersect_world(primary);
-	vec3 color = pow(get_color(hit), vec3(1.0 / 2.2))
+	vec3 color = pow(get_color(hit), vec3(1.0 / 2.2));
 	out_color = vec4(color, 1.0);
 
 	// out_color = vec4(vec3(rand_float(uv)), 1.0);
