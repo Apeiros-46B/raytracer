@@ -362,7 +362,13 @@ impl Raytracer {
 				gl.uniform_3_f32_slice(
 					gl.get_uniform_location(self.program, "scene_obj_mat_colors")
 					.as_ref(),
-					flatten_mats(&fill_50(&data.scene.mat_colors)),
+					bytemuck::cast_slice(&fill_50(&data.scene.mat_colors)),
+				);
+
+				gl.uniform_3_f32_slice(
+					gl.get_uniform_location(self.program, "scene_obj_mat_roughness")
+					.as_ref(),
+					&data.scene.mat_roughness,
 				);
 
 				gl.uniform_matrix_4_f32_slice(

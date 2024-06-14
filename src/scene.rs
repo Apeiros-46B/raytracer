@@ -1,4 +1,4 @@
-use egui::{DragValue, Ui};
+use egui::{DragValue, Slider, Ui};
 use glm::{identity, inverse, vec3, Mat4, Vec3};
 use nalgebra_glm as glm;
 
@@ -25,7 +25,8 @@ pub struct Scene {
 	pub scl: Vec<Vec3>,
 
 	// object material properties
-	pub mat_colors: Vec<Vec3>,
+	pub mat_colors: Vec<[f32; 3]>,
+	pub mat_roughness: Vec<f32>,
 
 	// cached object transforms
 	pub transforms: Vec<Mat4>,
@@ -96,11 +97,12 @@ impl Scene {
 					self.object_renaming_button(egui, ui, modal_open);
 					self.object_deletion_button(egui, ui, modal_open);
 					self.transformation_interface(ui);
+					self.material_interface(ui);
 				}
 			});
 	}
 
-	// {{{ object management interface
+	// {{{ select and add
 	fn object_management_interface(&mut self, ui: &mut Ui, modal_open: bool) {
 		ui.horizontal(|ui| {
 			ui.label("Select object:");
@@ -112,11 +114,8 @@ impl Scene {
 				})
 				.show_ui(ui, |ui| {
 					for i in 0..self.len() {
-						let value = ui.selectable_value(
-							&mut &self.selected,
-							&i,
-							&self.names[i],
-						);
+						let value =
+							ui.selectable_value(&mut &self.selected, &i, &self.names[i]);
 						if !modal_open && value.clicked() {
 							self.selected = i;
 						}
@@ -132,7 +131,7 @@ impl Scene {
 	}
 	// }}}
 
-	// {{{ object renaming button
+	// {{{ renaming
 	fn object_renaming_button(
 		&mut self,
 		egui: &egui::Context,
@@ -167,7 +166,7 @@ impl Scene {
 	}
 	// }}}
 
-	// {{{ object deletion button
+	// {{{ deletion
 	fn object_deletion_button(
 		&mut self,
 		egui: &egui::Context,
@@ -199,7 +198,7 @@ impl Scene {
 	}
 	// }}}
 
-	// {{{ position, rotation, scale
+	// {{{ transformation
 	fn transformation_interface(&mut self, ui: &mut Ui) {
 		if self.len() == 0 {
 			return;
@@ -224,11 +223,37 @@ impl Scene {
 			}
 		});
 	}
-	// }}}
 
 	transform_ui_for!(pos);
 	transform_ui_for!(rot);
 	transform_ui_for!(scl);
+	// }}}
+
+	// {{{ material
+	fn material_interface(&mut self, ui: &mut Ui) {
+		if self.len() == 0 {
+			return;
+		}
+
+		ui.collapsing("Material", |ui| {
+			ui.horizontal(|ui| {
+				ui.label("Color:");
+				let color =
+					ui.color_edit_button_rgb(&mut self.mat_colors[self.selected]);
+				self.update_response(color);
+			});
+
+			ui.horizontal(|ui| {
+				ui.label("Roughness:");
+				let color = ui.add(Slider::new(
+					&mut self.mat_roughness[self.selected],
+					0.0..=1.0,
+				));
+				self.update_response(color);
+			});
+		});
+	}
+	// }}}
 
 	pub fn new_object(&mut self) {
 		let ty = ObjectType::Sphere;
@@ -239,7 +264,8 @@ impl Scene {
 		self.rot.push(vec3(0.0, 0.0, 0.0));
 		self.scl.push(vec3(1.0, 1.0, 1.0));
 
-		self.mat_colors.push(vec3(1.0, 1.0, 1.0));
+		self.mat_colors.push([1.0, 1.0, 1.0]);
+		self.mat_roughness.push(0.5);
 
 		self.transforms.push(glm::identity());
 		self.inv_transforms.push(glm::identity());
@@ -258,6 +284,7 @@ impl Scene {
 		self.scl.remove(i);
 
 		self.mat_colors.remove(i);
+		self.mat_roughness.remove(i);
 
 		self.transforms.remove(i);
 		self.inv_transforms.remove(i);

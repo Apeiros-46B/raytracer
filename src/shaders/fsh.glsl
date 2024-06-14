@@ -28,22 +28,20 @@ const uint OBJ_TYPE_SPHERE = 0u;
 const uint OBJ_TYPE_BOX    = 1u;
 // }}}
 
-// 0x7f7f_fff = 0b0_11111110_11111111111111111111111 = 2139095039
-const float MAX_FLOAT = intBitsToFloat(2139095039);
-const uint MAX_SCENE_SIZE = 50u;
-const RayHit NO_HIT = RayHit(false, vec3(0.0), vec3(0.0), -1.0);
-
 uniform vec2 scr_size;
 uniform vec3 camera_pos;
 uniform uint frame_index;
 
 // {{{ scene
+const uint MAX_SCENE_SIZE = 50u;
+
 // generic
 uniform uint scene_size;
 uniform uint scene_obj_types[MAX_SCENE_SIZE];
 
 // material
 uniform vec3 scene_obj_mat_colors[MAX_SCENE_SIZE];
+uniform float scene_obj_mat_roughness[MAX_SCENE_SIZE];
 
 // transform
 uniform mat4 scene_transforms[MAX_SCENE_SIZE];
@@ -51,12 +49,16 @@ uniform mat4 scene_inv_transforms[MAX_SCENE_SIZE];
 uniform mat4 scene_normal_transforms[MAX_SCENE_SIZE];
 // }}}
 
+// {{{ settings
+// render
 uniform vec3 sky_color;
 uniform vec3 sun_dir;
 uniform float sun_strength;
 
+// world
 uniform uint render_mode;
 uniform uint max_bounces;
+// }}}
 
 // translate a vec3 by a mat4, mat multiplied on the left
 // {{{ transformation speech
@@ -72,7 +74,8 @@ Ray transform(Ray src, mat4 m) {
 	return Ray(
 		(m * vec4(src.origin, 1.0)).xyz,
 		// the zero here is NOT a mistake. this is needed to transform dir correctly
-		// see https://iquilezles.org/articles/boxfunctions/
+		// (discovered from https://iquilezles.org/articles/boxfunctions/)
+		// (see iq's ro and rd transforms)
 		normalize((m * vec4(src.dir, 0.0)).xyz)
 	);
 }
@@ -87,6 +90,8 @@ vec3 pos_from_ray(Ray ray, float t, mat4 m) {
 }
 
 // {{{ intersection functions
+const RayHit NO_HIT = RayHit(false, vec3(0.0), vec3(0.0), -1.0);
+
 // adapted from https://medium.com/@bromanz/another-view-on-the-classic-ray-aabb-intersection-algorithm-for-bvh-traversal-41125138b525
 bool intersect_aabb(Ray ray, vec3 corner0, vec3 corner1) {
 	// {{{
@@ -178,7 +183,7 @@ RayHit get_intersection(Ray primary, uint i) {
 	}
 }
 
-vec3 path_trace(RayHit hit) {
+vec3 path_trace(RayHit hit, uint i) {
 	// TODO
 	return vec3(1);
 }
@@ -190,7 +195,7 @@ vec3 get_color(RayHit hit, uint i) {
 				float light_fac = clamp(dot(hit.normal, sun_dir) * sun_strength, 0.2, 1.0);
 				return scene_obj_mat_colors[i] * light_fac;
 			case RENDER_REALISTIC:
-				return path_trace(hit);
+				return path_trace(hit, i);
 			case RENDER_POSITION:
 				return hit.pos / 2.0 + 0.5;
 			case RENDER_NORMAL:
@@ -207,5 +212,6 @@ void main() {
 	uint i = 0u;
 	Ray primary = primary_ray_for_cur_pixel();
 	RayHit hit = get_intersection(primary, i);
-	out_color = vec4(get_color(hit, i), 1.0);
+	vec3 color = pow(get_color(hit, i), vec3(1.0 / 2.2));
+	out_color = vec4(color, 1.0);
 }
