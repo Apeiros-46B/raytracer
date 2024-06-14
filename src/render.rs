@@ -7,7 +7,7 @@ use nalgebra_glm as glm;
 use crate::{
 	app::{PersistentData, RaytracingApp},
 	camera::Camera,
-	util::{flatten_mats, Reset},
+	util::{fill_50, flatten_mats, Reset},
 };
 
 pub struct Raytracer {
@@ -20,6 +20,7 @@ pub struct Raytracer {
 	verts: VertexArray,
 
 	scr_size: glm::Vec2,
+	first_frame: bool,
 	pub frame_index: u32,
 }
 
@@ -205,6 +206,7 @@ impl Raytracer {
 				verts,
 
 				scr_size,
+				first_frame: true,
 				frame_index: 0,
 			};
 			// initial ray direction calculation
@@ -237,6 +239,8 @@ impl Raytracer {
 			gl.bind_vertex_array(Some(self.verts));
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
 			gl.bind_texture(glow::TEXTURE_2D, None);
+
+			self.first_frame = false;
 		}
 	}
 	// }}}
@@ -340,8 +344,9 @@ impl Raytracer {
 			);
 			// }}}
 
-			if self.frame_index == 0 || data.scene.response.changed {
+			if self.first_frame || data.scene.response.changed {
 				// {{{ scene
+				// TODO: these aren't always 50 long which causes an error
 				gl.uniform_1_u32(
 					gl.get_uniform_location(self.program, "scene_size")
 					.as_ref(),
@@ -351,33 +356,39 @@ impl Raytracer {
 				gl.uniform_1_u32_slice(
 					gl.get_uniform_location(self.program, "scene_obj_types")
 					.as_ref(),
-					bytemuck::cast_slice(&data.scene.types),
+					&fill_50(bytemuck::cast_slice(&data.scene.types)),
+				);
+
+				gl.uniform_3_f32_slice(
+					gl.get_uniform_location(self.program, "scene_obj_mat_colors")
+					.as_ref(),
+					flatten_mats(&fill_50(&data.scene.mat_colors)),
 				);
 
 				gl.uniform_matrix_4_f32_slice(
 					gl.get_uniform_location(self.program, "scene_transforms")
 					.as_ref(),
 					false, // no transpose, it's already in column-major order
-					flatten_mats(&data.scene.transforms),
+					flatten_mats(&fill_50(&data.scene.transforms)),
 				);
 
 				gl.uniform_matrix_4_f32_slice(
 					gl.get_uniform_location(self.program, "scene_inv_transforms")
 					.as_ref(),
 					false, // no transpose, it's already in column-major order
-					flatten_mats(&data.scene.inv_transforms),
+					flatten_mats(&fill_50(&data.scene.inv_transforms)),
 				);
 
 				gl.uniform_matrix_4_f32_slice(
 					gl.get_uniform_location(self.program, "scene_normal_transforms")
 					.as_ref(),
 					false, // no transpose, it's already in column-major order
-					flatten_mats(&data.scene.normal_transforms),
+					flatten_mats(&fill_50(&data.scene.normal_transforms)),
 				);
 				// }}}
 			}
 
-			if self.frame_index == 0 || data.scene.response.changed {
+			if self.first_frame || data.settings.response.changed {
 				// {{{ world settings
 				// sky color
 				gl.uniform_3_f32(
@@ -409,6 +420,13 @@ impl Raytracer {
 				// }}}
 
 				// {{{ render settings
+				// render mode
+				gl.uniform_1_u32(
+					gl.get_uniform_location(self.program, "render_mode")
+						.as_ref(),
+					data.settings.render.mode as u32,
+				);
+
 				// maximum light bounces
 				gl.uniform_1_u32(
 					gl.get_uniform_location(self.program, "max_bounces")

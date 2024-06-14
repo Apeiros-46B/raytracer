@@ -52,7 +52,6 @@ pub struct RenderSettings {
 	pub denoise: bool,
 	pub lock_camera: bool,
 	pub max_bounces: u32,
-	pub render_scale: u32,
 }
 
 impl Default for RenderSettings {
@@ -63,7 +62,6 @@ impl Default for RenderSettings {
 			denoise: true,
 			lock_camera: false,
 			max_bounces: 5,
-			render_scale: 1,
 		}
 	}
 }
@@ -74,11 +72,11 @@ impl Default for RenderSettings {
 #[repr(u32)]
 pub enum RenderMode {
 	#[default]
-	Preview,
-	Realistic,
-	Position,
-	Normal,
-	Depth,
+	Preview   = 0,
+	Realistic = 1,
+	Position  = 2,
+	Normal    = 3,
+	Depth     = 4,
 }
 
 impl Display for RenderMode {
@@ -172,7 +170,7 @@ impl Settings {
 								selectable_values! {
 									target = self.render.mode,
 									focused = self.response.focused,
-									changed = self.response.changed,
+									clicked = self.response.changed,
 									[
 										RenderMode::Preview,
 										RenderMode::Realistic,

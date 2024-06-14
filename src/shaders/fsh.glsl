@@ -3,6 +3,7 @@ precision mediump float;
 precision mediump usampler2D;
 
 out vec4 out_color;
+uniform usampler2D ray_dirs;
 
 // {{{ typedefs
 struct Ray {
@@ -17,62 +18,45 @@ struct RayHit {
 	float distance;
 };
 
-// new ver
-// struct RayHit {
-// 	bool hit;
-// 	vec3 normal;
-// 	float dist_near;
-// 	float dist_far;
-// };
+const uint RENDER_PREVIEW   = 0u;
+const uint RENDER_REALISTIC = 1u;
+const uint RENDER_POSITION  = 2u;
+const uint RENDER_NORMAL    = 3u;
+const uint RENDER_DEPTH     = 4u;
+
+const uint OBJ_TYPE_SPHERE = 0u;
+const uint OBJ_TYPE_BOX    = 1u;
 // }}}
 
-const mat4 ID = mat4(1.0);
-const vec3 TODO = vec3(0);
+// 0x7f7f_fff = 0b0_11111110_11111111111111111111111 = 2139095039
+const float MAX_FLOAT = intBitsToFloat(2139095039);
 const uint MAX_SCENE_SIZE = 50u;
 const RayHit NO_HIT = RayHit(false, vec3(0.0), vec3(0.0), -1.0);
-// const RayHit NO_HIT = RayHit(false, vec3(0.0), -1.0, -1.0);
 
-// {{{ uniforms
 uniform vec2 scr_size;
 uniform vec3 camera_pos;
 uniform uint frame_index;
 
+// {{{ scene
+// generic
 uniform uint scene_size;
+uniform uint scene_obj_types[MAX_SCENE_SIZE];
+
+// material
+uniform vec3 scene_obj_mat_colors[MAX_SCENE_SIZE];
+
+// transform
 uniform mat4 scene_transforms[MAX_SCENE_SIZE];
 uniform mat4 scene_inv_transforms[MAX_SCENE_SIZE];
 uniform mat4 scene_normal_transforms[MAX_SCENE_SIZE];
+// }}}
 
 uniform vec3 sky_color;
 uniform vec3 sun_dir;
 uniform float sun_strength;
 
+uniform uint render_mode;
 uniform uint max_bounces;
-
-// passed as a texture from our prepass shader
-uniform usampler2D ray_dirs;
-// }}}
-
-// {{{ random number generation, use later for diffuse scattering
-// 0x7f7f_fff = 0b0_11111110_11111111111111111111111 = 2139095039
-// const float max_float = intBitsToFloat(2139095039);
-
-// float rand_float(inout uint seed) {
-// 	// PCG hash
-// 	uint state = seed * 747796405u + 2891336453u;
-// 	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-// 	seed = (word >> 22u) ^ word;
-
-// 	return float(seed) / max_float;
-// }
-
-// vec3 rand_in_unit_sphere(inout uint seed) {
-// 	return normalize(vec3(
-// 		rand_float(seed) * 2.0 - 1.0,
-// 		rand_float(seed) * 2.0 - 1.0,
-// 		rand_float(seed) * 2.0 - 1.0
-// 	));
-// }
-// }}}
 
 // translate a vec3 by a mat4, mat multiplied on the left
 // {{{ transformation speech
@@ -131,7 +115,7 @@ RayHit intersect_sph(Ray ray, uint i) {
 	// (dot product of two identical normalized vecs is 1)
 	// b would have a factor of 2 but it cancels with qf denominator
 	float b = dot(ray.origin, ray.dir);
-	float c = dot(ray.origin, ray.origin) - 1; // 1 = radius^2 = 1^2 = 1
+	float c = dot(ray.origin, ray.origin) - 1.0; // 1 = radius^2 = 1^2 = 1
 
 	float d = b * b - c;
 	if (d < 0.0) return NO_HIT;
@@ -185,17 +169,43 @@ Ray primary_ray_for_cur_pixel() {
 	return Ray(camera_pos, vec3(uintBitsToFloat(texel)));
 }
 
-vec3 get_cur_color() {
-	Ray primary = primary_ray_for_cur_pixel();
-	RayHit hit = intersect_sph(primary, 0u);
+RayHit get_intersection(Ray primary, uint i) {
+	switch (scene_obj_types[i]) {
+		case OBJ_TYPE_SPHERE:
+			return intersect_sph(primary, i);
+		case OBJ_TYPE_BOX:
+			return intersect_box(primary, i);
+	}
+}
+
+vec3 path_trace(RayHit hit) {
+	// TODO
+	return vec3(1);
+}
+
+vec3 get_color(RayHit hit, uint i) {
 	if (hit.hit) {
-		// return hit.normal / 2.0 + 0.5;
-		return hit.normal / 2.0 + 0.5;
+		switch (render_mode) {
+			case RENDER_PREVIEW:
+				float light_fac = clamp(dot(hit.normal, sun_dir) * sun_strength, 0.2, 1.0);
+				return scene_obj_mat_colors[i] * light_fac;
+			case RENDER_REALISTIC:
+				return path_trace(hit);
+			case RENDER_POSITION:
+				return hit.pos / 2.0 + 0.5;
+			case RENDER_NORMAL:
+				return hit.normal / 2.0 + 0.5;
+			case RENDER_DEPTH:
+				return vec3(hit.distance / 100.0);
+		}
 	} else {
 		return sky_color;
 	}
 }
 
 void main() {
-	out_color = vec4(get_cur_color(), 1.0);
+	uint i = 0u;
+	Ray primary = primary_ray_for_cur_pixel();
+	RayHit hit = get_intersection(primary, i);
+	out_color = vec4(get_color(hit, i), 1.0);
 }

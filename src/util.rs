@@ -1,6 +1,26 @@
 use egui::{Color32, Ui};
 use nalgebra::Const;
 
+// {{{ UI
+#[macro_export]
+macro_rules! selectable_values {
+	(
+		target = $ref:expr,
+		focused = $focused:expr,
+		clicked = $clicked:expr,
+		[$($alternative:expr),+ $(,)?]
+		$(,)?
+	) => {
+		|ui| {
+			$(
+				let value = ui.selectable_value(&mut $ref, $alternative, format!("{}", $alternative));
+				$focused |= value.has_focus();
+				$clicked |= value.changed();
+			)+
+		}
+	};
+}
+
 pub fn red_hover_button(ui: &mut Ui) {
 	ui.visuals_mut().widgets.hovered.weak_bg_fill =
 		Color32::from_rgb(240, 84, 84);
@@ -69,6 +89,7 @@ impl AngleControl for egui::DragValue<'_> {
 	}
 }
 // }}}
+// }}}
 
 // slice of nalgebra vectors or matrices -> slice of f32s
 pub fn flatten_mats<T, const R: usize, const C: usize>(
@@ -85,6 +106,12 @@ pub fn flatten_mats<T, const R: usize, const C: usize>(
 	}
 }
 
+pub fn fill_50<T: Copy + Default>(sl: &[T]) -> [T; 50] {
+	let mut a: [T; 50] = [T::default(); 50];
+	a[0..sl.len()].copy_from_slice(sl);
+	a
+}
+
 pub trait Reset {
 	fn reset(&mut self) where Self: Default {
 		*self = Self::default();
@@ -99,23 +126,4 @@ pub trait UpdateResponse {
 		self.set_focused(resp.has_focus());
 		self.set_changed(resp.changed());
 	}
-}
-
-#[macro_export]
-macro_rules! selectable_values {
-	(
-		target = $ref:expr,
-		focused = $focused:expr,
-		changed = $changed:expr,
-		[$($alternative:expr),+ $(,)?]
-		$(,)?
-	) => {
-		|ui| {
-			$(
-				let value = ui.selectable_value(&mut $ref, $alternative, format!("{}", $alternative));
-				$focused |= value.has_focus();
-				$changed |= value.changed();
-			)+
-		}
-	};
 }

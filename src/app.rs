@@ -24,11 +24,15 @@ pub struct PersistentData {
 
 impl PersistentData {
 	fn new(scr_size: glm::Vec2) -> Self {
-		Self {
+		let mut this = Self {
 			settings: Settings::default(),
 			camera: Camera::new(scr_size),
 			scene: Scene::default(),
-		}
+		};
+
+		this.scene.new_object();
+
+		this
 	}
 }
 

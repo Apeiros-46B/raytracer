@@ -5,23 +5,29 @@ use nalgebra_glm as glm;
 use crate::util::{modal, AngleControl, Reset, UpdateResponse};
 
 #[derive(
-	Clone, Copy, bytemuck::NoUninit, serde::Serialize, serde::Deserialize,
+	Clone, Copy, Debug, bytemuck::NoUninit, serde::Serialize, serde::Deserialize,
 )]
 #[repr(u32)]
 pub enum ObjectType {
-	Sphere,
-	Cube,
+	Sphere = 0,
+	Box = 1,
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Scene {
 	selected: usize,
+
+	// object properties
 	pub names: Vec<String>,
 	pub types: Vec<ObjectType>,
 	pub pos: Vec<Vec3>,
 	pub rot: Vec<Vec3>,
 	pub scl: Vec<Vec3>,
 
+	// object material properties
+	pub mat_colors: Vec<Vec3>,
+
+	// cached object transforms
 	pub transforms: Vec<Mat4>,
 	pub inv_transforms: Vec<Mat4>,
 	pub normal_transforms: Vec<Mat4>,
@@ -33,29 +39,6 @@ pub struct Scene {
 	delete_modal: bool,
 	pending_rename: String,
 	pending_rename_selected: usize,
-}
-
-impl Default for Scene {
-	fn default() -> Self {
-		Self {
-			selected: 0,
-			names: vec!["Default sphere".to_string()],
-			types: vec![ObjectType::Sphere],
-			pos: vec![vec3(0.0, 0.0, 0.0)],
-			rot: vec![vec3(0.0, 0.0, 0.0)],
-			scl: vec![vec3(1.0, 1.0, 1.0)],
-			transforms: vec![glm::identity()],
-			inv_transforms: vec![glm::identity()],
-			normal_transforms: vec![glm::identity()],
-
-			response: SceneResponse::default(),
-
-			rename_modal: false,
-			delete_modal: false,
-			pending_rename: "".to_string(),
-			pending_rename_selected: 0,
-		}
-	}
 }
 
 #[derive(Clone, Copy, Default)]
@@ -107,34 +90,45 @@ impl Scene {
 			.show(egui, |ui| {
 				let modal_open = self.rename_modal || self.delete_modal;
 
-				self.object_selection_menu(ui, modal_open);
-				self.object_renaming_button(egui, ui, modal_open);
-				self.object_deletion_button(egui, ui, modal_open);
-				self.transformation_interface(ui);
+				self.object_management_interface(ui, modal_open);
+
+				if self.len() > 0 {
+					self.object_renaming_button(egui, ui, modal_open);
+					self.object_deletion_button(egui, ui, modal_open);
+					self.transformation_interface(ui);
+				}
 			});
 	}
 
-	// {{{ object selection menu
-	fn object_selection_menu(&mut self, ui: &mut Ui, modal_open: bool) {
-		egui::ComboBox::new("scene_object_selector", "")
-			.selected_text(if self.names.is_empty() {
-				"No objects"
-			} else {
-				&self.names[self.selected]
-			})
-			.show_ui(ui, |ui| {
-				for i in 0..self.names.len() {
-					let value = ui.selectable_value(
-						&mut &self.names[i],
-						&self.names[self.selected],
-						&self.names[i],
-					);
-					if !modal_open && value.clicked() {
-						self.selected = i;
+	// {{{ object management interface
+	fn object_management_interface(&mut self, ui: &mut Ui, modal_open: bool) {
+		ui.horizontal(|ui| {
+			ui.label("Select object:");
+			egui::ComboBox::new("scene_object_selector", "")
+				.selected_text(if self.names.is_empty() {
+					"Scene is empty"
+				} else {
+					&self.names[self.selected]
+				})
+				.show_ui(ui, |ui| {
+					for i in 0..self.len() {
+						let value = ui.selectable_value(
+							&mut &self.selected,
+							&i,
+							&self.names[i],
+						);
+						if !modal_open && value.clicked() {
+							self.selected = i;
+						}
+						self.update_response(value);
 					}
-					self.update_response(value);
-				}
-			});
+				});
+		});
+
+		if ui.button("New object").clicked() {
+			self.new_object();
+			self.set_changed(true);
+		}
 	}
 	// }}}
 
@@ -199,7 +193,7 @@ impl Scene {
 		);
 
 		if do_delete {
-			// TODO delete
+			self.delete_object();
 			self.set_changed(true);
 		}
 	}
@@ -207,6 +201,10 @@ impl Scene {
 
 	// {{{ position, rotation, scale
 	fn transformation_interface(&mut self, ui: &mut Ui) {
+		if self.len() == 0 {
+			return;
+		}
+
 		ui.collapsing("Transform", |ui| {
 			let drag_speed = ui.input(|i| if i.modifiers.shift { 0.01 } else { 0.1 });
 
@@ -232,7 +230,43 @@ impl Scene {
 	transform_ui_for!(rot);
 	transform_ui_for!(scl);
 
-	pub fn recalc_transforms(&mut self) {
+	pub fn new_object(&mut self) {
+		let ty = ObjectType::Sphere;
+
+		self.names.push(format!("Unnamed {ty:?}"));
+		self.types.push(ty);
+		self.pos.push(vec3(0.0, 0.0, 0.0));
+		self.rot.push(vec3(0.0, 0.0, 0.0));
+		self.scl.push(vec3(1.0, 1.0, 1.0));
+
+		self.mat_colors.push(vec3(1.0, 1.0, 1.0));
+
+		self.transforms.push(glm::identity());
+		self.inv_transforms.push(glm::identity());
+		self.normal_transforms.push(glm::identity());
+
+		self.selected = self.len() - 1;
+	}
+
+	pub fn delete_object(&mut self) {
+		let i = self.selected;
+
+		self.names.remove(i);
+		self.types.remove(i);
+		self.pos.remove(i);
+		self.rot.remove(i);
+		self.scl.remove(i);
+
+		self.mat_colors.remove(i);
+
+		self.transforms.remove(i);
+		self.inv_transforms.remove(i);
+		self.normal_transforms.remove(i);
+
+		self.selected = i.saturating_sub(1);
+	}
+
+	fn recalc_transforms(&mut self) {
 		for i in 0..self.len() {
 			let pos = glm::translate(&identity(), &self.pos[i]);
 
@@ -243,6 +277,8 @@ impl Scene {
 
 			let scl = glm::scale(&identity(), &self.scl[i]);
 
+			// rightmost transforms are applied first
+			// (due to how matrix multiplication works)
 			let mat = pos * rot * scl;
 
 			self.transforms[i] = mat;
