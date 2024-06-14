@@ -101,6 +101,10 @@ vec3 pos_from_transform(mat4 m) {
 	return m[3].xyz;
 }
 
+vec3 pos_from_ray(Ray ray, float t) {
+	return ray.origin + ray.dir * t;
+}
+
 vec3 pos_from_ray(Ray ray, float t, mat4 m) {
 	return transform(ray.origin + ray.dir * t, m);
 }
@@ -117,18 +121,16 @@ bool intersect_aabb(Ray ray, vec3 corner0, vec3 corner1) {
 	vec3 tmin = min(t0, t1);
 	vec3 tmax = max(t0, t1);
 
-	float min_component = max(tmin.x, max(tmin.y, tmin.z));
-	float max_component = min(tmax.x, min(tmax.y, tmax.z));
+	float tn = max(tmin.x, max(tmin.y, tmin.z));
+	float tf = min(tmax.x, min(tmax.y, tmax.z));
 
-	return (min_component <= max_component);
+	return (tn <= tf);
 	// }}}
 }
 
 // adapted from The Cherno's series
 RayHit intersect_sphere(Ray ray, uint i) {
 	// {{{
-	vec3 orig_origin = ray.origin;
-	vec3 orig_dir = ray.dir;
 	Ray local_ray = transform(ray, scene_inv_transforms[i]);
 
 	// quadratic formula
@@ -142,45 +144,41 @@ RayHit intersect_sphere(Ray ray, uint i) {
 	float d = b * b - c;
 	if (d < 0.0) return NO_HIT;
 
-	float local_dist = (-b - sqrt(d));
-	if (local_dist < 0.0) return NO_HIT;
+	float local_distance = (-b - sqrt(d));
+	if (local_distance < 0.0) return NO_HIT;
 
-	vec3 world_pos = pos_from_ray(local_ray, local_dist, scene_transforms[i]);
-	float world_dist = distance(orig_origin, world_pos);
-	// TODO: this STILL doesn't work properly
-	vec3 normal = //transform(
-		normalize(world_pos - pos_from_transform(scene_transforms[i]));
-		// scene_normal_transforms[i]
-	// );
+	vec3 local_pos = pos_from_ray(local_ray, local_distance);
+	vec3 pos = transform(local_pos, scene_transforms[i]);
+	vec3 normal = transform(local_pos, scene_normal_transforms[i]);
+	float distance = distance(ray.origin, pos);
 
-	return RayHit(true, i, world_pos, normal, world_dist);
+	return RayHit(true, i, pos, normal, distance);
 	// }}}
 }
 
 // adapted from https://iquilezles.org/articles/intersectors/
 RayHit intersect_box(Ray ray, uint i) {
 	// {{{
-	vec3 orig_origin = ray.origin;
-	ray = transform(ray, scene_inv_transforms[i]);
+	Ray local_ray = transform(ray, scene_inv_transforms[i]);
 
-	vec3 inv = 1.0 / ray.dir;
-	vec3 n = inv * ray.origin;
+	vec3 inv = 1.0 / local_ray.dir;
+	vec3 n = inv * local_ray.origin;
 	vec3 k = abs(inv); // box size is (1, 1, 1); no need to multiply it
 	vec3 t1 = -n - k;
 	vec3 t2 = -n + k;
 
 	// near and far
-	float tn = max(max(t1.x, t1.y), t1.z);
-	float tf = min(min(t2.x, t2.y), t2.z);
+	float local_tn = max(max(t1.x, t1.y), t1.z);
+	float local_tf = min(min(t2.x, t2.y), t2.z);
 
-	if (tn > tf || tf < 0.0 || tn < 0.0) return NO_HIT;
+	if (local_tn > local_tf || local_tf < 0.0 || local_tn < 0.0) return NO_HIT;
 
-	vec3 pos = pos_from_ray(ray, tn, scene_transforms[i]);
+	vec3 pos = pos_from_ray(local_ray, local_tn, scene_transforms[i]);
 	vec3 normal = transform_n(
-		step(vec3(tn), t1) * -sign(ray.dir),
+		step(vec3(local_tn), t1) * -sign(local_ray.dir),
 		scene_normal_transforms[i]
 	);
-	float t = distance(orig_origin, pos); // transformed
+	float t = distance(ray.origin, pos); // transformed
 
 	return RayHit(true, i, pos, normal, t);
 	// }}}

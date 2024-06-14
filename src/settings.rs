@@ -103,6 +103,7 @@ impl Settings {
 	pub fn window(&mut self, egui: &egui::Context, frame_index: u32) {
 		egui::Window::new("Settings")
 			.resizable(false)
+			.anchor(egui::Align2::LEFT_TOP, [16.0, 16.0])
 			.show(egui, |ui| {
 				// {{{ performance stats
 				let frametime = ui.input(|i| i.unstable_dt);
