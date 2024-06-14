@@ -369,39 +369,25 @@ impl Raytracer {
 				);
 
 				gl.uniform_matrix_4_f32_slice(
-					gl.get_uniform_location(self.program, "scene_trans_transforms")
+					gl.get_uniform_location(self.program, "scene_normal_transforms")
 					.as_ref(),
 					false, // no transpose, it's already in column-major order
-					flatten_mats(&data.scene.inv_transforms),
-				);
-
-				gl.uniform_matrix_4_f32_slice(
-					gl.get_uniform_location(self.program, "scene_rot_transforms")
-					.as_ref(),
-					false, // no transpose, it's already in column-major order
-					flatten_mats(&data.scene.rot_transforms),
-				);
-
-				gl.uniform_matrix_4_f32_slice(
-					gl.get_uniform_location(self.program, "scene_inv_rot_transforms")
-					.as_ref(),
-					false, // no transpose, it's already in column-major order
-					flatten_mats(&data.scene.inv_rot_transforms),
+					flatten_mats(&data.scene.normal_transforms),
 				);
 				// }}}
 			}
 
-			// {{{ world settings
-			// sky color
-			gl.uniform_3_f32(
-				gl.get_uniform_location(self.program, "sky_color").as_ref(),
-				data.settings.world.sky_color[0],
-				data.settings.world.sky_color[1],
-				data.settings.world.sky_color[2],
-			);
+			if self.frame_index == 0 || data.scene.response.changed {
+				// {{{ world settings
+				// sky color
+				gl.uniform_3_f32(
+					gl.get_uniform_location(self.program, "sky_color").as_ref(),
+					data.settings.world.sky_color[0],
+					data.settings.world.sky_color[1],
+					data.settings.world.sky_color[2],
+				);
 
-			// sun direction
-			if self.frame_index == 0 || data.settings.response.sun_angle_changed {
+				// sun direction
 				let beta_cos = data.settings.world.sun_elevation.cos();
 				let x = data.settings.world.sun_rotation.cos() * beta_cos;
 				let y = data.settings.world.sun_elevation.sin();
@@ -413,24 +399,24 @@ impl Raytracer {
 					y / mag,
 					z / mag,
 				);
+
+				// sun strength
+				gl.uniform_1_f32(
+					gl.get_uniform_location(self.program, "sun_strength")
+						.as_ref(),
+					data.settings.world.sun_strength,
+				);
+				// }}}
+
+				// {{{ render settings
+				// maximum light bounces
+				gl.uniform_1_u32(
+					gl.get_uniform_location(self.program, "max_bounces")
+						.as_ref(),
+					data.settings.render.max_bounces,
+				);
+				// }}}
 			}
-
-			// sun strength
-			gl.uniform_1_f32(
-				gl.get_uniform_location(self.program, "sun_strength")
-					.as_ref(),
-				data.settings.world.sun_strength,
-			);
-			// }}}
-
-			// {{{ render settings
-			// maximum light bounces
-			gl.uniform_1_u32(
-				gl.get_uniform_location(self.program, "max_bounces")
-					.as_ref(),
-				data.settings.render.max_bounces,
-			);
-			// }}}
 		}
 	}
 }

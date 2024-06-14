@@ -35,7 +35,7 @@ impl Camera {
 	pub fn new(scr_size: Vec2) -> Self {
 		let vertical_fov = DEFAULT_FOV_DEG.to_radians();
 		let near_clip = 0.1;
-		let far_clip = 100.0;
+		let far_clip = 1000.0;
 
 		let pos = DEFAULT_POS;
 		let forward_dir = DEFAULT_FORWARD_DIR;

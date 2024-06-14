@@ -1,3 +1,4 @@
+// vim:commentstring=//%s
 precision mediump float;
 
 // screen
@@ -15,8 +16,8 @@ out uvec4 out_color;
 
 void main() {
 	// adapted from The Cherno's series
-	vec2 coord = gl_FragCoord.xy / scr_size * 2.0 - 1.0;
-	vec4 target = inv_proj * vec4(coord, 1, 1);
+	vec2 uv = gl_FragCoord.xy / scr_size * 2.0 - 1.0;
+	vec4 target = inv_proj * vec4(uv, 1, 1);
 	vec3 dir = vec3(inv_view * vec4(normalize(vec3(target) / target.w), 0));
 
 	out_color = uvec4(floatBitsToUint(dir), 0u);

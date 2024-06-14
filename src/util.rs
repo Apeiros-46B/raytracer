@@ -90,3 +90,32 @@ pub trait Reset {
 		*self = Self::default();
 	}
 }
+
+pub trait UpdateResponse {
+	fn set_focused(&mut self, focused: bool);
+	fn set_changed(&mut self, changed: bool);
+
+	fn update_response(&mut self, resp: egui::Response) {
+		self.set_focused(resp.has_focus());
+		self.set_changed(resp.changed());
+	}
+}
+
+#[macro_export]
+macro_rules! selectable_values {
+	(
+		target = $ref:expr,
+		focused = $focused:expr,
+		changed = $changed:expr,
+		[$($alternative:expr),+ $(,)?]
+		$(,)?
+	) => {
+		|ui| {
+			$(
+				let value = ui.selectable_value(&mut $ref, $alternative, format!("{}", $alternative));
+				$focused |= value.has_focus();
+				$changed |= value.changed();
+			)+
+		}
+	};
+}

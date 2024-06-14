@@ -1,8 +1,8 @@
 use egui::{DragValue, Ui};
-use glm::{inverse, vec3, Mat4, Vec3};
+use glm::{identity, inverse, vec3, Mat4, Vec3};
 use nalgebra_glm as glm;
 
-use crate::util::{modal, AngleControl, Reset};
+use crate::util::{modal, AngleControl, Reset, UpdateResponse};
 
 #[derive(
 	Clone, Copy, bytemuck::NoUninit, serde::Serialize, serde::Deserialize,
@@ -24,9 +24,7 @@ pub struct Scene {
 
 	pub transforms: Vec<Mat4>,
 	pub inv_transforms: Vec<Mat4>,
-	pub trans_transforms: Vec<Mat4>,
-	pub rot_transforms: Vec<Mat4>,
-	pub inv_rot_transforms: Vec<Mat4>,
+	pub normal_transforms: Vec<Mat4>,
 
 	#[serde(skip)]
 	pub response: SceneResponse,
@@ -48,9 +46,7 @@ impl Default for Scene {
 			scl: vec![vec3(1.0, 1.0, 1.0)],
 			transforms: vec![glm::identity()],
 			inv_transforms: vec![glm::identity()],
-			trans_transforms: vec![glm::identity()],
-			rot_transforms: vec![glm::identity()],
-			inv_rot_transforms: vec![glm::identity()],
+			normal_transforms: vec![glm::identity()],
 
 			response: SceneResponse::default(),
 
@@ -84,13 +80,13 @@ macro_rules! transform_ui_for {
 				ui.label(label);
 				ui.horizontal(|ui| {
 					for (i, axis) in (0..3).zip("XYZ".chars()) {
-						let response = ui.add(extra(
+						let drag = ui.add(extra(
 							DragValue::new(&mut self.$prop[self.selected].as_mut_slice()[i])
 								.prefix(format!("{axis}: "))
 								.speed(drag_speed),
 						));
-						*obj_changed |= response.changed();
-						self.response.focused |= response.has_focus();
+						*obj_changed |= drag.changed();
+						self.update_response(drag);
 					}
 				});
 			}
@@ -136,6 +132,7 @@ impl Scene {
 					if !modal_open && value.clicked() {
 						self.selected = i;
 					}
+					self.update_response(value);
 				}
 			});
 	}
@@ -171,6 +168,7 @@ impl Scene {
 
 		if do_rename {
 			self.names[self.selected].clone_from(&self.pending_rename);
+			self.set_changed(true);
 		}
 	}
 	// }}}
@@ -202,6 +200,7 @@ impl Scene {
 
 		if do_delete {
 			// TODO delete
+			self.set_changed(true);
 		}
 	}
 	// }}}
@@ -223,6 +222,7 @@ impl Scene {
 
 			if changed {
 				self.recalc_transforms();
+				self.set_changed(true);
 			}
 		});
 	}
@@ -234,23 +234,35 @@ impl Scene {
 
 	pub fn recalc_transforms(&mut self) {
 		for i in 0..self.len() {
-			let mut rot_mat = glm::identity();
-			rot_mat = glm::rotate_z(&rot_mat, self.rot[i].z);
-			rot_mat = glm::rotate_y(&rot_mat, self.rot[i].y);
-			rot_mat = glm::rotate_x(&rot_mat, self.rot[i].x);
+			let pos = glm::translate(&identity(), &self.pos[i]);
 
-			let mut mat = glm::identity();
-			mat = glm::translate(&mat, &self.pos[i]);
-			mat *= rot_mat;
-			mat = glm::scale(&mat, &self.scl[i]);
+			let mut rot = identity();
+			rot = glm::rotate_z(&rot, self.rot[i].z);
+			rot = glm::rotate_y(&rot, self.rot[i].y);
+			rot = glm::rotate_x(&rot, self.rot[i].x);
+
+			let scl = glm::scale(&identity(), &self.scl[i]);
+
+			let mat = pos * rot * scl;
 
 			self.transforms[i] = mat;
 			self.inv_transforms[i] = inverse(&mat);
-			self.trans_transforms[i] = glm::transpose(&mat);
-			self.rot_transforms[i] = rot_mat;
-			self.inv_rot_transforms[i] = glm::transpose(&rot_mat);
-		}
 
-		self.response.changed = true;
+			// normals are transformed:
+			// - without translation
+			// - with rotation
+			// - with inverted scale (reciprocal of scale factors)
+			self.normal_transforms[i] = rot * inverse(&scl);
+		}
+	}
+}
+
+impl UpdateResponse for Scene {
+	fn set_focused(&mut self, focused: bool) {
+		self.response.focused |= focused;
+	}
+
+	fn set_changed(&mut self, changed: bool) {
+		self.response.changed |= changed;
 	}
 }

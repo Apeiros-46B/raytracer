@@ -40,9 +40,7 @@ uniform uint frame_index;
 uniform uint scene_size;
 uniform mat4 scene_transforms[MAX_SCENE_SIZE];
 uniform mat4 scene_inv_transforms[MAX_SCENE_SIZE];
-uniform mat4 scene_trans_transforms[MAX_SCENE_SIZE];
-uniform mat4 scene_rot_transforms[MAX_SCENE_SIZE];
-uniform mat4 scene_inv_rot_transforms[MAX_SCENE_SIZE];
+uniform mat4 scene_normal_transforms[MAX_SCENE_SIZE];
 
 uniform vec3 sky_color;
 uniform vec3 sun_dir;
@@ -77,36 +75,37 @@ uniform usampler2D ray_dirs;
 // }}}
 
 // translate a vec3 by a mat4, mat multiplied on the left
-vec3 ltrans(vec3 src, mat4 m) {
+// {{{ transformation speech
+vec3 transform(vec3 src, mat4 m) {
 	return vec3(m * vec4(src, 1.0));
 }
 
-// {{{ intersection functions
-float ray_sphere_intersection(Ray ray, mat4 im) {
-	vec3 origin = ltrans(ray.origin, im);
-	vec3 dir = normalize(ltrans(ray.dir, im));
+vec3 transform_n(vec3 src, mat4 m) {
+	return normalize(vec3(m * vec4(src, 1.0)));
+}
 
-	float a = dot(dir, dir);
-	float b = 2.0 * dot(origin, dir);
-	float c = dot(origin, origin) - 1; // 1 = radius^2 = 1^2 = 1
-	float discriminant = b * b - 4.0 * a * c;
-
-	if (discriminant >= 0.0) {
-		float t = (-b - sqrt(discriminant)) / (2.0 * a);
-		if (t >= 0.0) {
-			return t;
-		} else {
-			return -1.0;
-		}
-	} else {
-		return -1.0;
-	}
+Ray transform(Ray src, mat4 m) {
+	return Ray(
+		(m * vec4(src.origin, 1.0)).xyz,
+		// the zero here is NOT a mistake. this is needed to transform dir correctly
+		// see https://iquilezles.org/articles/boxfunctions/
+		normalize((m * vec4(src.dir, 0.0)).xyz)
+	);
 }
 // }}}
 
-// {{{ new intersection functions
+vec3 pos_from_transform(mat4 m) {
+	return m[3].xyz;
+}
+
+vec3 pos_from_ray(Ray ray, float t, mat4 m) {
+	return transform(ray.origin + ray.dir * t, m);
+}
+
+// {{{ intersection functions
 // adapted from https://medium.com/@bromanz/another-view-on-the-classic-ray-aabb-intersection-algorithm-for-bvh-traversal-41125138b525
 bool intersect_aabb(Ray ray, vec3 corner0, vec3 corner1) {
+	// {{{
 	vec3 inv = 1.0 / ray.dir;
 	vec3 t0 = (corner0 - ray.origin) * inv;
 	vec3 t1 = (corner1 - ray.origin) * inv;
@@ -117,52 +116,67 @@ bool intersect_aabb(Ray ray, vec3 corner0, vec3 corner1) {
 	float max_component = min(tmax.x, min(tmax.y, tmax.z));
 
 	return (min_component <= max_component);
+	// }}}
 }
 
 // adapted from The Cherno's series
-RayHit intersect_sph(Ray ray, mat4 m, mat4 im, mat4 tm) {
-	vec3 origin = ltrans(ray.origin, im);
-	vec3 dir = normalize(ltrans(ray.dir, im));
+RayHit intersect_sph(Ray ray, uint i) {
+	// {{{
+	vec3 orig_origin = ray.origin;
+	vec3 orig_dir = ray.dir;
+	ray = transform(ray, scene_inv_transforms[i]);
 
-	// quadratic formula coefficients
-	// a is dot(dir, dir) which is 1
-	float b = 2.0 * dot(origin, dir);
-	float c = dot(origin, origin) - 1; // 1 = radius^2 = 1^2 = 1
-	float discrim = b * b - 4.0 * c;
+	// quadratic formula
+	// a is dot(dir, dir) which is 1 because dir is normalized
+	// (dot product of two identical normalized vecs is 1)
+	// b would have a factor of 2 but it cancels with qf denominator
+	float b = dot(ray.origin, ray.dir);
+	float c = dot(ray.origin, ray.origin) - 1; // 1 = radius^2 = 1^2 = 1
 
-	if (discrim < 0.0) return NO_HIT;
+	float d = b * b - c;
+	if (d < 0.0) return NO_HIT;
 
-	float t = (-b - sqrt(discrim)) / 2.0;
+	float t = (-b - sqrt(d));
+	if (t < 0.0) return NO_HIT;
 
-	return RayHit(t > 0.0, TODO, TODO, t);
+	vec3 pos = pos_from_ray(ray, t, scene_transforms[i]);
+	float tt = distance(orig_origin, pos); // transformed
+	vec3 normal = transform(
+		orig_origin - pos_from_transform(scene_transforms[i]),
+		scene_normal_transforms[i]
+	);
+
+	return RayHit(t > 0.0, pos, normal, tt);
+	// }}}
 }
 
 // adapted from https://iquilezles.org/articles/intersectors/
 RayHit intersect_box(Ray ray, uint i) {
-	mat4 m = scene_transforms[i];
-	mat4 im = scene_inv_transforms[i];
-	mat4 rm = scene_rot_transforms[i];
+	// {{{
+	vec3 orig_origin = ray.origin;
+	ray = transform(ray, scene_inv_transforms[i]);
 
-	vec3 origin = ltrans(ray.origin, im);
-	vec3 dir = normalize(ltrans(ray.dir, im));
-	vec3 inv = 1.0 / dir;
-
-	vec3 n = inv * origin;
+	vec3 inv = 1.0 / ray.dir;
+	vec3 n = inv * ray.origin;
 	vec3 k = abs(inv); // box size is (1, 1, 1); no need to multiply it
 	vec3 t1 = -n - k;
 	vec3 t2 = -n + k;
 
-	float t_near = max(max(t1.x, t1.y), t1.z);
-	float t_far = min(min(t2.x, t2.y), t2.z);
+	// near and far
+	float tn = max(max(t1.x, t1.y), t1.z);
+	float tf = min(min(t2.x, t2.y), t2.z);
 
-	if (t_near > t_far || t_far < 0.0) return NO_HIT;
+	if (tn > tf || tf < 0.0) return NO_HIT;
 
-	vec3 pos = ltrans(origin + dir * t_near, m);
-	vec3 normal = step(vec3(t_near), t1) * -sign(dir);
-	normal = ltrans(normal, rm);
+	vec3 pos = pos_from_ray(ray, tn, scene_transforms[i]);
+	vec3 normal = transform_n(
+		step(vec3(tn), t1) * -sign(ray.dir),
+		scene_normal_transforms[i]
+	);
+	float t = distance(orig_origin, pos); // transformed
 
-	// TODO: transform t_near
-	return RayHit(t_near > 0.0, pos, normal, t_near);
+	return RayHit(tn > 0.0, pos, normal, t);
+	// }}}
 }
 // }}}
 
@@ -171,52 +185,17 @@ Ray primary_ray_for_cur_pixel() {
 	return Ray(camera_pos, vec3(uintBitsToFloat(texel)));
 }
 
-void main() {
+vec3 get_cur_color() {
 	Ray primary = primary_ray_for_cur_pixel();
-	RayHit hit = intersect_box(primary, 0u);
+	RayHit hit = intersect_sph(primary, 0u);
 	if (hit.hit) {
-		// out_color = vec4(hit.normal, 1);
-		float light_fac = max(dot(hit.normal, sun_dir), 0.0);
-		light_fac *= sun_strength;
-		out_color = vec4(vec3(light_fac), 1);
+		// return hit.normal / 2.0 + 0.5;
+		return hit.normal / 2.0 + 0.5;
 	} else {
-		out_color = vec4(sky_color, 1);
+		return sky_color;
 	}
+}
 
-	// bool did_hit = false;
-
-	// for (uint i = 0u; i < MAX_SCENE_SIZE; i++) {
-	// 	if (i == scene_size) {
-	// 		break;
-	// 	}
-
-	// 	mat4 im = scene_inv_transforms[i];
-	// 	float t = ray_sphere_intersection(primary, im);
-
-	// 	if (t != -1.0) {
-	// 		mat4 m = scene_transforms[i];
-	// 		mat4 tm = scene_trans_transforms[i];
-
-	// 		// TODO: transforms for normals not working
-	// 		vec3 hit_pos = ltrans(primary.origin + primary.dir * t, tm);
-
-	// 		// color
-	// 		// float light_fac = max(dot(normalize(hit_pos), ltrans(sun_dir, im)), 0.0);
-	// 		// light_fac *= sun_strength;
-	// 		// out_color = vec4(vec3(light_fac), 1);
-
-	// 		// normal
-	// 		out_color = vec4(normalize(hit_pos), 1);
-
-	// 		// white
-	// 		// out_color = vec4(1);
-
-	// 		did_hit = true;
-	// 		break;
-	// 	}
-	// }
-
-	// if (!did_hit) {
-	// 	out_color = vec4(sky_color, 1);
-	// }
+void main() {
+	out_color = vec4(get_cur_color(), 1.0);
 }

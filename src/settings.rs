@@ -1,6 +1,11 @@
-use egui::Slider;
+use std::fmt::Display;
 
-use crate::util::{AngleControl, Reset};
+use egui::{ComboBox, Slider};
+
+use crate::{
+	selectable_values,
+	util::{AngleControl, Reset, UpdateResponse},
+};
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -43,8 +48,8 @@ impl Default for WorldSettings {
 #[serde(default)]
 pub struct RenderSettings {
 	pub fov: f32,
+	pub mode: RenderMode,
 	pub denoise: bool,
-	pub lighting: bool,
 	pub lock_camera: bool,
 	pub max_bounces: u32,
 	pub render_scale: u32,
@@ -54,11 +59,36 @@ impl Default for RenderSettings {
 	fn default() -> Self {
 		Self {
 			fov: crate::camera::DEFAULT_FOV_DEG.to_radians(),
+			mode: RenderMode::default(),
 			denoise: true,
-			lighting: false,
 			lock_camera: false,
 			max_bounces: 5,
 			render_scale: 1,
+		}
+	}
+}
+
+#[derive(
+	Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
+#[repr(u32)]
+pub enum RenderMode {
+	#[default]
+	Preview,
+	Realistic,
+	Position,
+	Normal,
+	Depth,
+}
+
+impl Display for RenderMode {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Preview => write!(f, "Preview shading"),
+			Self::Realistic => write!(f, "Realistic shading"),
+			Self::Position => write!(f, "Position (debug)"),
+			Self::Normal => write!(f, "Normal (debug)"),
+			Self::Depth => write!(f, "Distance (debug)"),
 		}
 	}
 }
@@ -69,7 +99,8 @@ pub struct SettingsResponse {
 	pub screenshot: bool,
 	pub save_data: bool,
 	pub clear_data: bool,
-	pub sun_angle_changed: bool,
+
+	pub changed: bool,
 }
 impl Reset for SettingsResponse {}
 
@@ -85,46 +116,46 @@ impl Settings {
 					(frametime * 1000.0),
 					(1.0 / frametime).round(),
 				));
+
+				if self.render.mode == RenderMode::Realistic {
+					ui.label(format!("(sample {frame_index})"));
+				}
 				// }}}
 
 				// {{{ world settings
 				ui.collapsing("World settings", |ui| {
 					ui.horizontal(|ui| {
 						ui.label("Background color:");
-						self.response.focused |= ui
-							.color_edit_button_rgb(&mut self.world.sky_color)
-							.has_focus();
+						let color = ui.color_edit_button_rgb(&mut self.world.sky_color);
+						self.update_response(color);
 					});
 
 					ui.horizontal(|ui| {
 						ui.label("Sun warmth:");
-						self.response.focused |= ui
-							.add(
-								Slider::new(&mut self.world.sun_warmth, 1200.0..=12000.0)
-									.suffix("K"),
-							)
-							.has_focus();
+						let slider = ui.add(
+							Slider::new(&mut self.world.sun_warmth, 1200.0..=12000.0)
+								.suffix("K"),
+						);
+						self.update_response(slider);
 					});
 
 					ui.horizontal(|ui| {
 						ui.label("Sun strength:");
-						self.response.focused |= ui
-							.add(Slider::new(&mut self.world.sun_strength, 0.0..=10.0))
-							.has_focus();
+						let slider =
+							ui.add(Slider::new(&mut self.world.sun_strength, 0.0..=10.0));
+						self.update_response(slider);
 					});
 
 					ui.horizontal(|ui| {
 						ui.label("Sun elevation:");
 						let angle = ui.drag_angle(&mut self.world.sun_elevation);
-						self.response.focused |= angle.has_focus();
-						self.response.sun_angle_changed |= angle.changed();
+						self.update_response(angle);
 					});
 
 					ui.horizontal(|ui| {
 						ui.label("Sun rotation:");
 						let angle = ui.drag_angle(&mut self.world.sun_rotation);
-						self.response.focused |= angle.has_focus();
-						self.response.sun_angle_changed |= angle.changed();
+						self.update_response(angle);
 					});
 				});
 				// }}}
@@ -132,39 +163,59 @@ impl Settings {
 				// {{{ render settings
 				ui.collapsing("Render settings", |ui| {
 					ui.horizontal(|ui| {
-						ui.checkbox(&mut self.render.lighting, "Realistic lighting");
-						if self.render.lighting {
-							ui.label(format!("(sample {frame_index})"));
-						}
+						ui.label("Render mode");
+						// {{{ select render mode
+						ComboBox::new("render_mode_selector", "")
+							.selected_text(format!("{}", self.render.mode))
+							.show_ui(
+								ui,
+								selectable_values! {
+									target = self.render.mode,
+									focused = self.response.focused,
+									changed = self.response.changed,
+									[
+										RenderMode::Preview,
+										RenderMode::Realistic,
+										RenderMode::Position,
+										RenderMode::Normal,
+										RenderMode::Depth,
+									],
+								},
+							);
 					});
+					// }}}
 
-					if self.render.lighting {
-						ui.checkbox(&mut self.render.denoise, "Denoising");
+					if self.render.mode == RenderMode::Realistic {
+						let checkbox = ui.checkbox(&mut self.render.denoise, "Denoising");
+						self.update_response(checkbox);
 					}
 
-					ui.checkbox(
-						&mut self.render.lock_camera,
-						"Lock camera (useful when rendering)",
-					);
+					{
+						let checkbox = ui.checkbox(
+							&mut self.render.lock_camera,
+							"Lock camera (useful when rendering)",
+						);
+						self.update_response(checkbox);
+					}
 
 					ui.horizontal(|ui| {
 						ui.label("Max ray bounces:");
-						self.response.focused |= ui
-							.add(Slider::new(&mut self.render.max_bounces, 1..=10))
-							.has_focus();
+						let slider = ui
+							.add(Slider::new(&mut self.render.max_bounces, 1..=10));
+						self.update_response(slider);
 					});
 
 					ui.horizontal(|ui| {
 						ui.label("Field of view:");
-						self.response.focused |= ui
+						let slider = ui
 							.add(
 								Slider::new(
 									&mut self.render.fov,
 									(50.0_f32.to_radians())..=(120.0_f32.to_radians()),
 								)
 								.angle(),
-							)
-							.has_focus();
+							);
+						self.update_response(slider);
 					});
 				});
 				// }}}
@@ -199,5 +250,15 @@ impl Settings {
 				);
 				// }}}
 			});
+	}
+}
+
+impl UpdateResponse for Settings {
+	fn set_focused(&mut self, focused: bool) {
+		self.response.focused |= focused;
+	}
+
+	fn set_changed(&mut self, changed: bool) {
+		self.response.changed |= changed;
 	}
 }
