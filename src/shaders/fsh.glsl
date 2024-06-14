@@ -76,26 +76,24 @@ float rand_float(vec2 uv) {
 }
 // }}}
 
-// translate a vec3 by a mat4, mat multiplied on the left
-// {{{ transformation speech
+// {{{ transformation and ray helpers
 vec3 transform(vec3 src, mat4 m) {
-	return vec3(m * vec4(src, 1.0));
+	return (m * vec4(src, 1.0)).xyz;
 }
 
 vec3 transform_n(vec3 src, mat4 m) {
-	return normalize(vec3(m * vec4(src, 1.0)));
+	return normalize((m * vec4(src, 1.0)).xyz);
 }
 
 Ray transform(Ray src, mat4 m) {
 	return Ray(
-		(m * vec4(src.origin, 1.0)).xyz,
+		transform(src.origin, m),
 		// the zero here is NOT a mistake. this is needed to transform dir correctly
 		// (discovered from https://iquilezles.org/articles/boxfunctions/)
 		// (see iq's ro and rd transforms)
 		normalize((m * vec4(src.dir, 0.0)).xyz)
 	);
 }
-// }}}
 
 vec3 pos_from_transform(mat4 m) {
 	return m[3].xyz;
@@ -108,8 +106,9 @@ vec3 pos_from_ray(Ray ray, float t) {
 vec3 pos_from_ray(Ray ray, float t, mat4 m) {
 	return transform(ray.origin + ray.dir * t, m);
 }
+// }}}
 
-// {{{ intersection functions
+// {{{ intersections
 const RayHit NO_HIT = RayHit(false, 0u, vec3(0.0), vec3(0.0), MAX_FLOAT);
 
 // adapted from https://medium.com/@bromanz/another-view-on-the-classic-ray-aabb-intersection-algorithm-for-bvh-traversal-41125138b525
@@ -149,7 +148,9 @@ RayHit intersect_sphere(Ray ray, uint i) {
 
 	vec3 local_pos = pos_from_ray(local_ray, local_distance);
 	vec3 pos = transform(local_pos, scene_transforms[i]);
-	vec3 normal = transform(local_pos, scene_normal_transforms[i]);
+	// in local space, the sphere is centered on the origin and has radius 1
+	// the local position of the ray hit is automatically equal to the local normal
+	vec3 normal = transform_n(local_pos, scene_normal_transforms[i]);
 	float distance = distance(ray.origin, pos);
 
 	return RayHit(true, i, pos, normal, distance);
@@ -178,9 +179,9 @@ RayHit intersect_box(Ray ray, uint i) {
 		step(vec3(local_tn), t1) * -sign(local_ray.dir),
 		scene_normal_transforms[i]
 	);
-	float t = distance(ray.origin, pos); // transformed
+	float distance = distance(ray.origin, pos); // transformed
 
-	return RayHit(true, i, pos, normal, t);
+	return RayHit(true, i, pos, normal, distance);
 	// }}}
 }
 // }}}
