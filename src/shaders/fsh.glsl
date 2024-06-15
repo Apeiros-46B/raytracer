@@ -40,6 +40,7 @@ uniform uint frame_index;
 const uint MAX_SCENE_SIZE = 50u;
 
 // generic
+uniform uint scene_selected;
 uniform uint scene_size;
 uniform uint scene_obj_types[MAX_SCENE_SIZE];
 
@@ -54,13 +55,14 @@ uniform mat4 scene_normal_transforms[MAX_SCENE_SIZE];
 // }}}
 
 // {{{ settings
-// render
+// world
 uniform vec3 sky_color;
 uniform vec3 sun_dir;
 uniform float sun_strength;
 
-// world
+// render
 uniform uint render_mode;
+uniform uint highlight_selected;
 uniform uint max_bounces;
 // }}}
 
@@ -219,7 +221,10 @@ vec3 get_color(RayHit hit) {
 		switch (render_mode) {
 			case RENDER_PREVIEW:
 				float light_fac = clamp(dot(hit.normal, sun_dir) * sun_strength, 0.05, 1.0);
-				return scene_obj_mat_colors[hit.obj] * light_fac;
+				vec3 addend = (highlight_selected == 1u) && (hit.obj == scene_selected)
+							? vec3(0.4, 0.2, 0.1)
+							: vec3(0.0);
+				return (scene_obj_mat_colors[hit.obj] * light_fac) + addend;
 			case RENDER_REALISTIC:
 				return path_trace(hit);
 			case RENDER_POSITION:

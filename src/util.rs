@@ -92,7 +92,7 @@ impl AngleControl for egui::DragValue<'_> {
 // }}}
 
 // slice of nalgebra vectors or matrices -> slice of f32s
-pub fn flatten_mats<T, const R: usize, const C: usize>(
+pub fn flatten_matrices<T, const R: usize, const C: usize>(
 	src: &[nalgebra::Matrix<
 		T,
 		Const<R>,

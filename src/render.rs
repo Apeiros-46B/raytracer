@@ -7,7 +7,7 @@ use nalgebra_glm as glm;
 use crate::{
 	app::{PersistentData, RaytracingApp},
 	camera::Camera,
-	util::{fill_50, flatten_mats, Reset},
+	util::{fill_50, flatten_matrices, Reset},
 };
 
 pub struct Raytracer {
@@ -346,7 +346,12 @@ impl Raytracer {
 
 			if self.first_frame || data.scene.response.changed {
 				// {{{ scene
-				// TODO: these aren't always 50 long which causes an error
+				gl.uniform_1_u32(
+					gl.get_uniform_location(self.program, "scene_selected")
+						.as_ref(),
+					data.scene.selected.try_into().unwrap(),
+				);
+
 				gl.uniform_1_u32(
 					gl.get_uniform_location(self.program, "scene_size").as_ref(),
 					data.scene.len().try_into().unwrap(),
@@ -360,35 +365,35 @@ impl Raytracer {
 
 				gl.uniform_3_f32_slice(
 					gl.get_uniform_location(self.program, "scene_obj_mat_colors")
-					.as_ref(),
+						.as_ref(),
 					bytemuck::cast_slice(&fill_50(&data.scene.mat_colors)),
 				);
 
 				gl.uniform_3_f32_slice(
 					gl.get_uniform_location(self.program, "scene_obj_mat_roughness")
-					.as_ref(),
-					&data.scene.mat_roughness,
+						.as_ref(),
+					&fill_50(&data.scene.mat_roughness),
 				);
 
 				gl.uniform_matrix_4_f32_slice(
 					gl.get_uniform_location(self.program, "scene_transforms")
 						.as_ref(),
 					false, // no transpose, it's already in column-major order
-					flatten_mats(&fill_50(&data.scene.transforms)),
+					flatten_matrices(&fill_50(&data.scene.transforms)),
 				);
 
 				gl.uniform_matrix_4_f32_slice(
 					gl.get_uniform_location(self.program, "scene_inv_transforms")
 						.as_ref(),
 					false, // no transpose, it's already in column-major order
-					flatten_mats(&fill_50(&data.scene.inv_transforms)),
+					flatten_matrices(&fill_50(&data.scene.inv_transforms)),
 				);
 
 				gl.uniform_matrix_4_f32_slice(
 					gl.get_uniform_location(self.program, "scene_normal_transforms")
 						.as_ref(),
 					false, // no transpose, it's already in column-major order
-					flatten_mats(&fill_50(&data.scene.normal_transforms)),
+					flatten_matrices(&fill_50(&data.scene.normal_transforms)),
 				);
 				// }}}
 			}
@@ -430,6 +435,13 @@ impl Raytracer {
 					gl.get_uniform_location(self.program, "render_mode")
 						.as_ref(),
 					data.settings.render.mode as u32,
+				);
+
+				// highlight selected object
+				gl.uniform_1_u32(
+					gl.get_uniform_location(self.program, "highlight_selected")
+						.as_ref(),
+					data.settings.render.highlight as u32,
 				);
 
 				// maximum light bounces

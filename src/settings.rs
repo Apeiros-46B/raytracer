@@ -1,8 +1,6 @@
 use egui::{ComboBox, Slider};
 
-use crate::{
-	util::{AngleControl, Reset, UpdateResponse},
-};
+use crate::util::{AngleControl, Reset, UpdateResponse};
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -47,6 +45,7 @@ pub struct RenderSettings {
 	pub fov: f32,
 	pub mode: RenderMode,
 	pub denoise: bool,
+	pub highlight: bool,
 	pub lock_camera: bool,
 	pub max_bounces: u32,
 }
@@ -57,6 +56,7 @@ impl Default for RenderSettings {
 			fov: crate::camera::DEFAULT_FOV_DEG.to_radians(),
 			mode: RenderMode::default(),
 			denoise: true,
+			highlight: true,
 			lock_camera: false,
 			max_bounces: 5,
 		}
@@ -69,11 +69,11 @@ impl Default for RenderSettings {
 #[repr(u32)]
 pub enum RenderMode {
 	#[default]
-	Preview   = 0,
+	Preview = 0,
 	Realistic = 1,
-	Position  = 2,
-	Normal    = 3,
-	Depth     = 4,
+	Position = 2,
+	Normal = 3,
+	Depth = 4,
 }
 
 impl std::fmt::Display for RenderMode {
@@ -188,6 +188,14 @@ impl Settings {
 
 					{
 						let checkbox = ui.checkbox(
+							&mut self.render.highlight,
+							"Highlight selected object",
+						);
+						self.update_response(checkbox);
+					}
+
+					{
+						let checkbox = ui.checkbox(
 							&mut self.render.lock_camera,
 							"Lock camera (useful when rendering)",
 						);
@@ -196,21 +204,20 @@ impl Settings {
 
 					ui.horizontal(|ui| {
 						ui.label("Max ray bounces:");
-						let slider = ui
-							.add(Slider::new(&mut self.render.max_bounces, 1..=10));
+						let slider =
+							ui.add(Slider::new(&mut self.render.max_bounces, 1..=10));
 						self.update_response(slider);
 					});
 
 					ui.horizontal(|ui| {
 						ui.label("Field of view:");
-						let slider = ui
-							.add(
-								Slider::new(
-									&mut self.render.fov,
-									(50.0_f32.to_radians())..=(120.0_f32.to_radians()),
-								)
-								.angle(),
-							);
+						let slider = ui.add(
+							Slider::new(
+								&mut self.render.fov,
+								(50.0_f32.to_radians())..=(120.0_f32.to_radians()),
+							)
+							.angle(),
+						);
 						self.update_response(slider);
 					});
 				});

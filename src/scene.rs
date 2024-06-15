@@ -21,7 +21,7 @@ impl std::fmt::Display for ObjectType {
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Scene {
-	selected: usize,
+	pub selected: usize,
 
 	// object properties
 	pub names: Vec<String>,
