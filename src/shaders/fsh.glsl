@@ -356,8 +356,7 @@ Ray primary_ray(vec2 uv) {
 
 void main() {
 	vec2 uv = gl_FragCoord.xy / scr_size;
-	float sample = float(frame_index);
-	float rng_seed = (uv.x + uv.y) * sample;
+	float rng_seed = (uv.x + uv.y) * float(frame_index);
 
 	// TODO: randomly skew a tiny bit for free "anti aliasing"
 	Ray primary = primary_ray(uv);
