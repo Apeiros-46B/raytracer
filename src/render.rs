@@ -1,6 +1,6 @@
 use eframe::{
 	egui_glow,
-	glow::{self, Context, HasContext, Program, VertexArray},
+	glow::{self, Context, Framebuffer, HasContext, Program, Texture, VertexArray},
 };
 use nalgebra_glm as glm;
 
@@ -11,16 +11,26 @@ use crate::{
 };
 
 pub struct Raytracer {
+	clear_fbo: Framebuffer,
+
 	// prepass calculates ray directions for each pixel when the screen size changes
-	ray_dirs_fbo: glow::Framebuffer,
-	ray_dirs_texture: glow::Texture,
+	ray_dirs_fbo: Framebuffer,
+	ray_dirs_texture: Texture,
 	ray_dirs_program: Program,
 	ray_dirs_verts: VertexArray,
+
+	accumulation_fbo: Framebuffer,
+	accumulation_texture_0: Texture,
+	accumulation_texture_1: Texture,
 	program: Program,
 	verts: VertexArray,
 
+	final_program: Program,
+	final_verts: VertexArray,
+
 	scr_size: glm::Vec2,
 	first_frame: bool,
+	using_texture_0: bool,
 	pub frame_index: u32,
 }
 
@@ -95,12 +105,9 @@ impl RaytracingApp {
 					let mut data = data_mutex.lock();
 
 					let gl = painter.gl();
+					let scr_size = glm::vec2(scr_size.x, scr_size.y);
 
-					raytracer.set_scr_size(
-						gl,
-						&mut data.camera,
-						glm::vec2(scr_size.x, scr_size.y),
-					);
+					raytracer.set_scr_size(gl, &mut data.camera, scr_size);
 
 					raytracer.paint(gl, &data);
 					raytracer.frame_index += 1;
@@ -111,8 +118,8 @@ impl RaytracingApp {
 						data.camera.set_fov(fov);
 						if !ui_focused && data.camera.update(input.clone()) {
 							// don't respond to keypresses if text is focused
-							// reset frame index if moved
-							raytracer.frame_index = 0;
+							// raytracer.frame_index = 0;
+							raytracer.reset(gl, scr_size, false);
 						};
 						if data.camera.recalculate_ray_dirs {
 							raytracer.calculate_ray_dirs(gl, &data.camera);
@@ -137,13 +144,11 @@ impl Raytracer {
 			// {{{ create shader programs
 			let ray_dirs_program = gl.create_program().expect("create program failed");
 			let program = gl.create_program().expect("create program failed");
+			let final_program = gl.create_program().expect("create program failed");
 
-			compile_shaders(
-				gl,
-				ray_dirs_program,
-				fragment_shader!("ray_dirs_fsh.glsl"),
-			);
+			compile_shaders(gl, ray_dirs_program, fragment_shader!("ray_dirs_fsh.glsl"));
 			compile_shaders(gl, program, fragment_shader!("fsh.glsl"));
+			compile_shaders(gl, final_program, fragment_shader!("final_fsh.glsl"));
 
 			let ray_dirs_verts = gl
 				.create_vertex_array()
@@ -151,42 +156,26 @@ impl Raytracer {
 			let verts = gl
 				.create_vertex_array()
 				.expect("create vertex array failed");
+			let final_verts = gl
+				.create_vertex_array()
+				.expect("create vertex array failed");
 			// }}}
 
-			// {{{ create accumulation FBO
+			// {{{ create accumulation FBO and texture
 			let accumulation_fbo = gl.create_framebuffer().expect("create FBO failed");
-			let accumulation_texture = gl.create_texture().expect("create texture failed");
+			let accumulation_texture_0 =
+				gl.create_texture().expect("create texture failed");
+			let accumulation_texture_1 =
+				gl.create_texture().expect("create texture failed");
 
-			gl.bind_texture(glow::TEXTURE_2D, Some(accumulation_texture));
+			gl.bind_texture(glow::TEXTURE_2D, Some(accumulation_texture_0));
+			screen_sized_texture(gl, scr_size, true);
+			gl.bind_texture(glow::TEXTURE_2D, Some(accumulation_texture_1));
+			screen_sized_texture(gl, scr_size, true);
+
 			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_fbo));
-			gl.tex_image_2d(
-				glow::TEXTURE_2D,
-				0,
-				glow::RGBA32UI as i32,
-				scr_size.x as i32,
-				scr_size.y as i32,
-				0,
-				glow::RGBA_INTEGER,
-				glow::UNSIGNED_INT,
-				None,
-			);
-			gl.tex_parameter_i32(
-				glow::TEXTURE_2D,
-				glow::TEXTURE_MIN_FILTER,
-				glow::NEAREST as i32,
-			);
-			gl.tex_parameter_i32(
-				glow::TEXTURE_2D,
-				glow::TEXTURE_MAG_FILTER,
-				glow::NEAREST as i32,
-			);
-			gl.framebuffer_texture_2d(
-				glow::FRAMEBUFFER,
-				glow::COLOR_ATTACHMENT0,
-				glow::TEXTURE_2D,
-				Some(accumulation_texture),
-				0,
-			);
+			framebuffer_texture(gl, accumulation_texture_0);
+
 			gl.bind_texture(glow::TEXTURE_2D, None);
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 
@@ -203,34 +192,8 @@ impl Raytracer {
 
 			gl.bind_texture(glow::TEXTURE_2D, Some(ray_dirs_texture));
 			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(ray_dirs_fbo));
-			gl.tex_image_2d(
-				glow::TEXTURE_2D,
-				0,
-				glow::RGBA32UI as i32,
-				scr_size.x as i32,
-				scr_size.y as i32,
-				0,
-				glow::RGBA_INTEGER,
-				glow::UNSIGNED_INT,
-				None,
-			);
-			gl.tex_parameter_i32(
-				glow::TEXTURE_2D,
-				glow::TEXTURE_MIN_FILTER,
-				glow::NEAREST as i32,
-			);
-			gl.tex_parameter_i32(
-				glow::TEXTURE_2D,
-				glow::TEXTURE_MAG_FILTER,
-				glow::NEAREST as i32,
-			);
-			gl.framebuffer_texture_2d(
-				glow::FRAMEBUFFER,
-				glow::COLOR_ATTACHMENT0,
-				glow::TEXTURE_2D,
-				Some(ray_dirs_texture),
-				0,
-			);
+			screen_sized_texture(gl, scr_size, true);
+			framebuffer_texture(gl, ray_dirs_texture);
 			gl.bind_texture(glow::TEXTURE_2D, None);
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 
@@ -242,15 +205,25 @@ impl Raytracer {
 			// }}}
 
 			let mut this = Self {
+				clear_fbo: gl.create_framebuffer().expect("create FBO failed"),
+
 				ray_dirs_fbo,
 				ray_dirs_texture,
 				ray_dirs_program,
 				ray_dirs_verts,
+
+				accumulation_fbo,
+				accumulation_texture_0,
+				accumulation_texture_1,
 				program,
 				verts,
 
+				final_program,
+				final_verts,
+
 				scr_size,
 				first_frame: true,
+				using_texture_0: true,
 				frame_index: 0,
 			};
 			// initial ray direction calculation
@@ -262,13 +235,21 @@ impl Raytracer {
 	// {{{ clean up GL objects
 	pub fn destroy(&self, gl: &Context) {
 		unsafe {
+			gl.delete_framebuffer(self.clear_fbo);
+
 			gl.delete_framebuffer(self.ray_dirs_fbo);
 			gl.delete_texture(self.ray_dirs_texture);
 			gl.delete_program(self.ray_dirs_program);
 			gl.delete_vertex_array(self.ray_dirs_verts);
 
+			gl.delete_framebuffer(self.accumulation_fbo);
+			gl.delete_texture(self.accumulation_texture_0);
+			gl.delete_texture(self.accumulation_texture_1);
 			gl.delete_program(self.program);
 			gl.delete_vertex_array(self.verts);
+
+			gl.delete_program(self.final_program);
+			gl.delete_vertex_array(self.final_verts);
 		}
 	}
 	// }}}
@@ -276,15 +257,90 @@ impl Raytracer {
 	// {{{ call on every frame to render
 	pub fn paint(&mut self, gl: &Context, data: &PersistentData) {
 		unsafe {
+			// {{{ draw ray traced image into accumulation buffer
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 			gl.use_program(Some(self.program));
+
 			self.apply_uniforms(gl, data);
+
+			// bind samplers
+			if self.first_frame {
+				gl.uniform_1_i32(
+					gl.get_uniform_location(self.program, "ray_dirs").as_ref(),
+					0, // ray directions texture
+				);
+				gl.uniform_1_i32(
+					gl.get_uniform_location(self.program, "image").as_ref(),
+					1, // accumulation texture, one of the two buffers
+				);
+			}
+			gl.active_texture(glow::TEXTURE0);
 			gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
+
+			// which texture to sample from (the one that isn't being rendered to)
+			gl.active_texture(glow::TEXTURE1);
+			gl.bind_texture(glow::TEXTURE_2D, Some(
+				if self.using_texture_0 {
+					self.accumulation_texture_1
+				} else {
+					self.accumulation_texture_0
+				}
+			));
+
+			// draw into accumulation buffer
 			gl.bind_vertex_array(Some(self.verts));
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.accumulation_fbo));
+
+			// unbind the other texture (the one that is being sampled)
+			framebuffer_texture(gl, if self.using_texture_0 {
+				self.accumulation_texture_0
+			} else {
+				self.accumulation_texture_1
+			});
+
+			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
+			// unbind
+			gl.bind_vertex_array(None);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 			gl.bind_texture(glow::TEXTURE_2D, None);
+			// }}}
+
+			// render accumulation buffer with post-process effects
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+			gl.use_program(Some(self.final_program));
+
+			gl.uniform_2_f32(
+				gl.get_uniform_location(self.final_program, "scr_size")
+					.as_ref(),
+				self.scr_size.x,
+				self.scr_size.y,
+			);
+
+			// texture sampler
+			gl.uniform_1_i32(
+				gl.get_uniform_location(self.final_program, "image")
+					.as_ref(),
+				0,
+			);
+
+			// sample from the one that just got rendered to
+			gl.active_texture(glow::TEXTURE0);
+			if self.using_texture_0 {
+				gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_0));
+			} else {
+				gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_1));
+			}
+			gl.bind_vertex_array(Some(self.final_verts));
+			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
+			gl.bind_texture(glow::TEXTURE_2D, None);
+			gl.bind_vertex_array(None);
+			gl.use_program(Some(self.program));
 
 			self.first_frame = false;
+			self.using_texture_0 = !self.using_texture_0;
 		}
 	}
 	// }}}
@@ -302,22 +358,38 @@ impl Raytracer {
 
 		self.scr_size = new_scr_size;
 		camera.set_scr_size(new_scr_size);
+		self.reset(gl, new_scr_size, true);
+	}
+	// }}}
+
+	// {{{ reset textures
+	fn reset(&mut self, gl: &Context, scr_size: glm::Vec2, reallocate_textures: bool) {
+		self.frame_index = 0;
 
 		unsafe {
-			// resize ray directions texture
-			gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
-			gl.tex_image_2d(
-				glow::TEXTURE_2D,
-				0,
-				glow::RGBA32UI as i32,
-				new_scr_size.x as i32,
-				new_scr_size.y as i32,
-				0,
-				glow::RGBA_INTEGER,
-				glow::UNSIGNED_INT,
-				None,
-			);
-			gl.bind_texture(glow::TEXTURE_2D, None);
+			if reallocate_textures {
+				gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
+				screen_sized_texture(gl, scr_size, false);
+				gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_0));
+				screen_sized_texture(gl, scr_size, true);
+				gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_1));
+				screen_sized_texture(gl, scr_size, true);
+			} else {
+				// don't clear ray dirs
+				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.clear_fbo));
+				framebuffer_texture(gl, self.accumulation_texture_0);
+				gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
+				gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
+				framebuffer_texture(gl, self.accumulation_texture_1);
+				gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
+				gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
+				// gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
+				// screen_sized_texture(gl, scr_size, false);
+				// gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_0));
+				// screen_sized_texture(gl, scr_size, true);
+				// gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_1));
+				// screen_sized_texture(gl, scr_size, true);
+			}
 		}
 	}
 	// }}}
@@ -434,8 +506,11 @@ impl Raytracer {
 				);
 
 				gl.uniform_1_f32_slice(
-					gl.get_uniform_location(self.program, "scene_obj_mat_transmissive_opacity")
-						.as_ref(),
+					gl.get_uniform_location(
+						self.program,
+						"scene_obj_mat_transmissive_opacity",
+					)
+					.as_ref(),
 					&fill_50(&data.scene.mat_transmissive_opacity),
 				);
 
@@ -516,6 +591,12 @@ impl Raytracer {
 					data.settings.render.mode as u32,
 				);
 
+				gl.uniform_1_u32(
+					gl.get_uniform_location(self.program, "accumulate")
+						.as_ref(),
+					data.settings.render.accumulate as u32,
+				);
+
 				// highlight selected object
 				gl.uniform_1_u32(
 					gl.get_uniform_location(self.program, "highlight_selected")
@@ -533,4 +614,41 @@ impl Raytracer {
 			}
 		}
 	}
+}
+
+unsafe fn screen_sized_texture(gl: &Context, scr_size: glm::Vec2, params: bool) {
+	gl.tex_image_2d(
+		glow::TEXTURE_2D,
+		0,
+		glow::RGBA32UI as i32,
+		scr_size.x as i32,
+		scr_size.y as i32,
+		0,
+		glow::RGBA_INTEGER,
+		glow::UNSIGNED_INT,
+		None,
+	);
+
+	if params {
+		gl.tex_parameter_i32(
+			glow::TEXTURE_2D,
+			glow::TEXTURE_MIN_FILTER,
+			glow::NEAREST as i32,
+		);
+		gl.tex_parameter_i32(
+			glow::TEXTURE_2D,
+			glow::TEXTURE_MAG_FILTER,
+			glow::NEAREST as i32,
+		);
+	}
+}
+
+unsafe fn framebuffer_texture(gl: &Context, texture: Texture) {
+	gl.framebuffer_texture_2d(
+		glow::FRAMEBUFFER,
+		glow::COLOR_ATTACHMENT0,
+		glow::TEXTURE_2D,
+		Some(texture),
+		0,
+	);
 }

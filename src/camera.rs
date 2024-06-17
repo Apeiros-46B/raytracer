@@ -67,7 +67,7 @@ impl Camera {
 		}
 	}
 
-	// return: whether the camera moved
+	// return: whether the camera is moving
 	pub fn update(&mut self, input: egui::InputState) -> bool {
 		if input.key_pressed(Key::R) {
 			self.pos = DEFAULT_POS;
@@ -76,7 +76,7 @@ impl Camera {
 			return true;
 		}
 
-		let mut moved = false;
+		let mut moving = false;
 		let dt = input.unstable_dt;
 		let right_dir = glm::cross(&self.forward_dir, &UP_DIR);
 
@@ -90,26 +90,26 @@ impl Camera {
 
 		if input.key_down(Key::W) {
 			self.pos += self.forward_dir * speed * dt;
-			moved = true;
+			moving = true;
 		} else if input.key_down(Key::S) {
 			self.pos -= self.forward_dir * speed * dt;
-			moved = true;
+			moving = true;
 		}
 
 		if input.key_down(Key::A) {
 			self.pos -= right_dir * speed * dt;
-			moved = true;
+			moving = true;
 		} else if input.key_down(Key::D) {
 			self.pos += right_dir * speed * dt;
-			moved = true;
+			moving = true;
 		}
 
 		if input.key_down(Key::Q) {
 			self.pos -= UP_DIR * speed * dt;
-			moved = true;
+			moving = true;
 		} else if input.key_down(Key::E) {
 			self.pos += UP_DIR * speed * dt;
-			moved = true;
+			moving = true;
 		}
 
 		if input.pointer.secondary_down() && input.pointer.is_moving() {
@@ -122,14 +122,14 @@ impl Camera {
 
 			self.forward_dir = glm::quat_rotate_vec3(&q, &self.forward_dir);
 
-			moved = true;
+			moving = true;
 		}
 
-		if moved {
+		if moving {
 			self.recalc_view();
 		}
 
-		moved
+		moving
 	}
 
 	pub fn set_fov(&mut self, new_fov: f32) {

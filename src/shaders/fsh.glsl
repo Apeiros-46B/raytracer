@@ -2,8 +2,9 @@
 precision mediump float;
 precision mediump usampler2D;
 
-out vec4 out_color;
+out uvec4 out_color;
 uniform usampler2D ray_dirs;
+uniform usampler2D image;
 
 // {{{ typedefs
 struct Ray {
@@ -39,6 +40,7 @@ const float MAX_FLOAT = intBitsToFloat(2139095039);
 uniform vec2 scr_size;
 uniform vec3 camera_pos;
 uniform uint frame_index;
+uniform uint accumulate;
 
 // {{{ scene
 const uint MAX_SCENE_SIZE = 50u;
@@ -141,7 +143,7 @@ vec3 pos_from_ray(Ray ray, float t, mat4 m) {
 
 // extremely unrealistic approximation of fresnel
 float fresnel(vec3 incident, vec3 normal) {
-	return pow(max(dot(incident, normal) + 1, 0.0), 2) * 0.7;
+	return pow(max(dot(incident, normal) + 1.0, 0.0), 2.0) * 0.7;
 }
 // }}}
 
@@ -349,8 +351,11 @@ void main() {
 
 	// TODO: randomly skew a tiny bit for free "anti aliasing"
 	Ray primary = primary_ray(uv);
-	vec3 color = pow(get_color(primary, seed), vec3(1.0 / 2.2));
-	out_color = vec4(color, 1.0);
-
-	// out_color = vec4(vec3(rand_float(uv)), 1.0);
+	vec3 color = get_color(primary, seed);
+	if (frame_index > 0u && accumulate == 1u) {
+		vec3 prev_frame = uintBitsToFloat(texture(image, uv).rgb);
+		color += prev_frame;
+		color *= 0.5;
+	}
+	out_color = floatBitsToUint(vec4(color, 1.0));
 }

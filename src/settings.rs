@@ -45,7 +45,7 @@ impl Default for WorldSettings {
 pub struct RenderSettings {
 	pub fov: f32,
 	pub mode: RenderMode,
-	pub denoise: bool,
+	pub accumulate: bool,
 	pub highlight: bool,
 	pub lock_camera: bool,
 	pub max_bounces: u32,
@@ -56,7 +56,7 @@ impl Default for RenderSettings {
 		Self {
 			fov: crate::camera::DEFAULT_FOV_DEG.to_radians(),
 			mode: RenderMode::default(),
-			denoise: true,
+			accumulate: true,
 			highlight: true,
 			lock_camera: false,
 			max_bounces: 5,
@@ -103,7 +103,7 @@ pub struct SettingsResponse {
 
 impl Default for SettingsResponse {
 	fn default() -> Self {
-	  Self {
+		Self {
 			focused: false,
 			screenshot: false,
 			save_data: false,
@@ -115,7 +115,7 @@ impl Default for SettingsResponse {
 
 impl Reset for SettingsResponse {
 	fn reset_state() -> Self {
-	  Self {
+		Self {
 			changed: false,
 			..Default::default()
 		}
@@ -125,153 +125,150 @@ impl Reset for SettingsResponse {
 
 impl Settings {
 	pub fn window(&mut self, egui: &egui::Context, frame_index: u32) {
-		egui::Window::new("Settings")
-			.show(egui, |ui| {
-				// {{{ performance stats
-				let frametime = ui.input(|i| i.unstable_dt);
-				ui.label(format!(
-					"Frametime: {:.4}ms ({} FPS)",
-					(frametime * 1000.0),
-					(1.0 / frametime).round(),
-				));
+		egui::Window::new("Settings").show(egui, |ui| {
+			// {{{ performance stats
+			let frametime = ui.input(|i| i.unstable_dt);
+			ui.label(format!(
+				"Frametime: {:.4}ms ({} FPS)",
+				(frametime * 1000.0),
+				(1.0 / frametime).round(),
+			));
+
+			if self.render.mode == RenderMode::Realistic && self.render.accumulate {
+				ui.label(format!("(sample {frame_index})"));
+			}
+			// }}}
+
+			// {{{ world settings
+			ui.collapsing("World settings", |ui| {
+				ui.horizontal(|ui| {
+					ui.label("Sky color:");
+					let color = ui.color_edit_button_rgb(&mut self.world.sky_color);
+					self.update_response(color);
+				});
+
+				ui.horizontal(|ui| {
+					ui.label("Sun color:");
+					let color = ui.color_edit_button_rgb(&mut self.world.sun_color);
+					self.update_response(color);
+				});
+
+				ui.horizontal(|ui| {
+					ui.label("Sun strength:");
+					let slider =
+						ui.add(Slider::new(&mut self.world.sun_strength, 0.0..=10.0));
+					self.update_response(slider);
+				});
+
+				ui.horizontal(|ui| {
+					ui.label("Sun elevation:");
+					let angle = ui.drag_angle(&mut self.world.sun_elevation);
+					self.update_response(angle);
+				});
+
+				ui.horizontal(|ui| {
+					ui.label("Sun rotation:");
+					let angle = ui.drag_angle(&mut self.world.sun_rotation);
+					self.update_response(angle);
+				});
+			});
+			// }}}
+
+			// {{{ render settings
+			ui.collapsing("Render settings", |ui| {
+				ui.horizontal(|ui| {
+					ui.label("Render mode:");
+					// {{{ select render mode
+					egui::ComboBox::new("render_mode_selector", "")
+						.selected_text(format!("{}", self.render.mode))
+						.show_ui(
+							ui,
+							crate::selectable_values! {
+								target = self.render.mode,
+								focused = self.response.focused,
+								changed = self.response.changed,
+								[
+									RenderMode::Preview,
+									RenderMode::Realistic,
+									RenderMode::Position,
+									RenderMode::Normal,
+									RenderMode::Depth,
+								],
+							},
+						);
+				});
+				// }}}
 
 				if self.render.mode == RenderMode::Realistic {
-					ui.label(format!("(sample {frame_index})"));
+					let checkbox =
+						ui.checkbox(&mut self.render.accumulate, "Accumulate samples");
+					self.update_response(checkbox);
 				}
-				// }}}
 
-				// {{{ world settings
-				ui.collapsing("World settings", |ui| {
-					ui.horizontal(|ui| {
-						ui.label("Sky color:");
-						let color = ui.color_edit_button_rgb(&mut self.world.sky_color);
-						self.update_response(color);
-					});
+				{
+					let checkbox =
+						ui.checkbox(&mut self.render.highlight, "Highlight selected object");
+					self.update_response(checkbox);
+				}
 
-					ui.horizontal(|ui| {
-						ui.label("Sun color:");
-						let color = ui.color_edit_button_rgb(&mut self.world.sun_color);
-						self.update_response(color);
-					});
+				{
+					let checkbox = ui.checkbox(
+						&mut self.render.lock_camera,
+						"Lock camera (useful when rendering)",
+					);
+					self.update_response(checkbox);
+				}
 
-					ui.horizontal(|ui| {
-						ui.label("Sun strength:");
-						let slider =
-							ui.add(Slider::new(&mut self.world.sun_strength, 0.0..=10.0));
-						self.update_response(slider);
-					});
-
-					ui.horizontal(|ui| {
-						ui.label("Sun elevation:");
-						let angle = ui.drag_angle(&mut self.world.sun_elevation);
-						self.update_response(angle);
-					});
-
-					ui.horizontal(|ui| {
-						ui.label("Sun rotation:");
-						let angle = ui.drag_angle(&mut self.world.sun_rotation);
-						self.update_response(angle);
-					});
+				ui.horizontal(|ui| {
+					ui.label("Max ray bounces:");
+					let slider = ui.add(Slider::new(&mut self.render.max_bounces, 1..=10));
+					self.update_response(slider);
 				});
-				// }}}
 
-				// {{{ render settings
-				ui.collapsing("Render settings", |ui| {
-					ui.horizontal(|ui| {
-						ui.label("Render mode:");
-						// {{{ select render mode
-						egui::ComboBox::new("render_mode_selector", "")
-							.selected_text(format!("{}", self.render.mode))
-							.show_ui(
-								ui,
-								crate::selectable_values! {
-									target = self.render.mode,
-									focused = self.response.focused,
-									changed = self.response.changed,
-									[
-										RenderMode::Preview,
-										RenderMode::Realistic,
-										RenderMode::Position,
-										RenderMode::Normal,
-										RenderMode::Depth,
-									],
-								},
-							);
-					});
-					// }}}
-
-					if self.render.mode == RenderMode::Realistic {
-						let checkbox = ui.checkbox(&mut self.render.denoise, "Denoising");
-						self.update_response(checkbox);
-					}
-
-					{
-						let checkbox = ui.checkbox(
-							&mut self.render.highlight,
-							"Highlight selected object",
-						);
-						self.update_response(checkbox);
-					}
-
-					{
-						let checkbox = ui.checkbox(
-							&mut self.render.lock_camera,
-							"Lock camera (useful when rendering)",
-						);
-						self.update_response(checkbox);
-					}
-
-					ui.horizontal(|ui| {
-						ui.label("Max ray bounces:");
-						let slider =
-							ui.add(Slider::new(&mut self.render.max_bounces, 1..=10));
-						self.update_response(slider);
-					});
-
-					ui.horizontal(|ui| {
-						ui.label("Field of view:");
-						let slider = ui.add(
-							Slider::new(
-								&mut self.render.fov,
-								(50.0_f32.to_radians())..=(120.0_f32.to_radians()),
-							)
-							.angle(),
-						);
-						self.update_response(slider);
-					});
+				ui.horizontal(|ui| {
+					ui.label("Field of view:");
+					let slider = ui.add(
+						Slider::new(
+							&mut self.render.fov,
+							(50.0_f32.to_radians())..=(120.0_f32.to_radians()),
+						)
+						.angle(),
+					);
+					self.update_response(slider);
 				});
-				// }}}
-
-				if ui.button("Temporarily hide windows").clicked() {
-					self.response.screenshot = true;
-				}
-
-				if ui.button("Manually save data").clicked() {
-					self.response.save_data = true;
-				}
-
-				// {{{ clear data button
-				if ui.button("Clear all data").clicked() {
-					self.data_modal = true;
-				}
-
-				crate::util::modal(
-					egui,
-					"Clear all data?",
-					&mut self.data_modal,
-					|ui| {
-						ui.label("This will delete:");
-						ui.label("- Scene objects and associated materials");
-						ui.label("- Camera parameters");
-						ui.label("- Saved settings");
-					},
-					crate::util::red_hover_button,
-					|| {
-						self.response.clear_data = true;
-					},
-				);
-				// }}}
 			});
+			// }}}
+
+			if ui.button("Temporarily hide windows").clicked() {
+				self.response.screenshot = true;
+			}
+
+			if ui.button("Manually save data").clicked() {
+				self.response.save_data = true;
+			}
+
+			// {{{ clear data button
+			if ui.button("Clear all data").clicked() {
+				self.data_modal = true;
+			}
+
+			crate::util::modal(
+				egui,
+				"Clear all data?",
+				&mut self.data_modal,
+				|ui| {
+					ui.label("This will delete:");
+					ui.label("- Scene objects and associated materials");
+					ui.label("- Camera parameters");
+					ui.label("- Saved settings");
+				},
+				crate::util::red_hover_button,
+				|| {
+					self.response.clear_data = true;
+				},
+			);
+			// }}}
+		});
 	}
 }
 
