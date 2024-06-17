@@ -110,7 +110,6 @@ impl RaytracingApp {
 					raytracer.set_scr_size(gl, &mut data.camera, scr_size);
 
 					raytracer.paint(gl, &data);
-					raytracer.frame_index += 1;
 
 					if !data.settings.render.lock_camera {
 						// {{{ update camera
@@ -118,14 +117,19 @@ impl RaytracingApp {
 						data.camera.set_fov(fov);
 						if !ui_focused && data.camera.update(input.clone()) {
 							// don't respond to keypresses if text is focused
-							// raytracer.frame_index = 0;
-							raytracer.reset(gl, scr_size, false);
+							raytracer.frame_index = 1;
+							raytracer.clear_textures(gl);
 						};
 						if data.camera.recalculate_ray_dirs {
 							raytracer.calculate_ray_dirs(gl, &data.camera);
 							data.camera.recalculate_ray_dirs = false;
 						}
 						// }}}
+					}
+
+					if data.settings.response.changed {
+						raytracer.frame_index = 1;
+						raytracer.clear_textures(gl);
 					}
 
 					data.settings.response.reset();
@@ -224,7 +228,9 @@ impl Raytracer {
 				scr_size,
 				first_frame: true,
 				using_texture_0: true,
-				frame_index: 0,
+
+				// this starts at one to avoid division by zero
+				frame_index: 1,
 			};
 			// initial ray direction calculation
 			this.calculate_ray_dirs(gl, camera);
@@ -298,7 +304,7 @@ impl Raytracer {
 				self.accumulation_texture_1
 			});
 
-			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
+			// gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
 			// unbind
@@ -311,6 +317,14 @@ impl Raytracer {
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 			gl.use_program(Some(self.final_program));
 
+			// {{{ uniforms
+			// texture sampler
+			gl.uniform_1_i32(
+				gl.get_uniform_location(self.final_program, "image")
+					.as_ref(),
+				0,
+			);
+
 			gl.uniform_2_f32(
 				gl.get_uniform_location(self.final_program, "scr_size")
 					.as_ref(),
@@ -318,12 +332,18 @@ impl Raytracer {
 				self.scr_size.y,
 			);
 
-			// texture sampler
-			gl.uniform_1_i32(
-				gl.get_uniform_location(self.final_program, "image")
+			gl.uniform_1_u32(
+				gl.get_uniform_location(self.final_program, "frame_index")
 					.as_ref(),
-				0,
+				self.frame_index,
 			);
+
+			gl.uniform_1_u32(
+				gl.get_uniform_location(self.final_program, "accumulate")
+					.as_ref(),
+				data.settings.render.accumulate as u32,
+			);
+			// }}}
 
 			// sample from the one that just got rendered to
 			gl.active_texture(glow::TEXTURE0);
@@ -340,6 +360,7 @@ impl Raytracer {
 			gl.use_program(Some(self.program));
 
 			self.first_frame = false;
+			self.frame_index += 1;
 			self.using_texture_0 = !self.using_texture_0;
 		}
 	}
@@ -358,38 +379,33 @@ impl Raytracer {
 
 		self.scr_size = new_scr_size;
 		camera.set_scr_size(new_scr_size);
-		self.reset(gl, new_scr_size, true);
+
+		self.frame_index = 1;
+		self.realloc_textures(gl, new_scr_size);
 	}
 	// }}}
 
 	// {{{ reset textures
-	fn reset(&mut self, gl: &Context, scr_size: glm::Vec2, reallocate_textures: bool) {
-		self.frame_index = 0;
-
+	fn realloc_textures(&self, gl: &Context, scr_size: glm::Vec2) {
 		unsafe {
-			if reallocate_textures {
-				gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
-				screen_sized_texture(gl, scr_size, false);
-				gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_0));
-				screen_sized_texture(gl, scr_size, true);
-				gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_1));
-				screen_sized_texture(gl, scr_size, true);
-			} else {
-				// don't clear ray dirs
-				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.clear_fbo));
-				framebuffer_texture(gl, self.accumulation_texture_0);
-				gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
-				gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
-				framebuffer_texture(gl, self.accumulation_texture_1);
-				gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
-				gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
-				// gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
-				// screen_sized_texture(gl, scr_size, false);
-				// gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_0));
-				// screen_sized_texture(gl, scr_size, true);
-				// gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_1));
-				// screen_sized_texture(gl, scr_size, true);
-			}
+			gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
+			screen_sized_texture(gl, scr_size, false);
+			gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_0));
+			screen_sized_texture(gl, scr_size, true);
+			gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_1));
+			screen_sized_texture(gl, scr_size, true);
+		}
+	}
+
+	fn clear_textures(&self, gl: &Context) {
+		unsafe {
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.clear_fbo));
+			framebuffer_texture(gl, self.accumulation_texture_0);
+			gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
+			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
+			framebuffer_texture(gl, self.accumulation_texture_1);
+			gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
+			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
 		}
 	}
 	// }}}

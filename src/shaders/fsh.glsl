@@ -25,6 +25,8 @@ const uint RENDER_REALISTIC = 1u;
 const uint RENDER_POSITION  = 2u;
 const uint RENDER_NORMAL    = 3u;
 const uint RENDER_DEPTH     = 4u;
+const uint RENDER_FRESNEL   = 5u;
+const uint RENDER_ROUGHNESS = 6u;
 
 const uint OBJ_TYPE_SPHERE = 0u;
 const uint OBJ_TYPE_BOX    = 1u;
@@ -143,7 +145,8 @@ vec3 pos_from_ray(Ray ray, float t, mat4 m) {
 
 // extremely unrealistic approximation of fresnel
 float fresnel(vec3 incident, vec3 normal) {
-	return pow(max(dot(incident, normal) + 1.0, 0.0), 2.0) * 0.7;
+	return pow(clamp(dot(incident, normal) + 1.0, 0.0, 1.0), 3.0) * 0.3;
+	// return pow(smoothstep(0.0, 1.0, dot(incident, normal) + 1.0), 3.0) * 0.3;
 }
 // }}}
 
@@ -337,6 +340,12 @@ vec3 get_color(Ray primary, float seed) {
 			return hit.normal / 2.0 + 0.5;
 		case RENDER_DEPTH:
 			return vec3(hit.distance / 100.0);
+		case RENDER_FRESNEL:
+			return vec3(fresnel(primary.dir, hit.normal));
+		case RENDER_ROUGHNESS:
+			float r = scene_obj_mat_roughness[hit.obj];
+			// return vec3(max(r - fresnel(primary.dir, hit.normal), 0.0));
+			return vec3(smoothstep(0.0, fresnel(primary.dir, hit.normal), r));
 	}
 }
 
@@ -347,15 +356,14 @@ Ray primary_ray(vec2 uv) {
 
 void main() {
 	vec2 uv = gl_FragCoord.xy / scr_size;
-	float seed = (uv.x + uv.y) * float(frame_index);
+	float sample = float(frame_index);
+	float rng_seed = (uv.x + uv.y) * sample;
 
 	// TODO: randomly skew a tiny bit for free "anti aliasing"
 	Ray primary = primary_ray(uv);
-	vec3 color = get_color(primary, seed);
-	if (frame_index > 0u && accumulate == 1u) {
-		vec3 prev_frame = uintBitsToFloat(texture(image, uv).rgb);
-		color += prev_frame;
-		color *= 0.5;
+	vec3 color = get_color(primary, rng_seed);
+	if (frame_index > 1u && accumulate == 1u) {
+		color += uintBitsToFloat(texture(image, uv).rgb);
 	}
 	out_color = floatBitsToUint(vec4(color, 1.0));
 }

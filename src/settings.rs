@@ -75,16 +75,20 @@ pub enum RenderMode {
 	Position = 2,
 	Normal = 3,
 	Depth = 4,
+	Fresnel = 5,
+	Roughness = 6,
 }
 
 impl std::fmt::Display for RenderMode {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			Self::Preview => write!(f, "Preview shading"),
+			Self::Preview   => write!(f, "Preview shading"),
 			Self::Realistic => write!(f, "Realistic shading"),
-			Self::Position => write!(f, "Position (debug)"),
-			Self::Normal => write!(f, "Normal (debug)"),
-			Self::Depth => write!(f, "Distance (debug)"),
+			Self::Position  => write!(f, "Position (debug)"),
+			Self::Normal    => write!(f, "Normal (debug)"),
+			Self::Depth     => write!(f, "Distance (debug)"),
+			Self::Fresnel   => write!(f, "Fresnel (debug)"),
+			Self::Roughness => write!(f, "Roughness (debug)"),
 		}
 	}
 }
@@ -193,6 +197,8 @@ impl Settings {
 									RenderMode::Position,
 									RenderMode::Normal,
 									RenderMode::Depth,
+									RenderMode::Fresnel,
+									RenderMode::Roughness,
 								],
 							},
 						);
