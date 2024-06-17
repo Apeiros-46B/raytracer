@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+
+<!-- Disable zooming: -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+<head>
+	<title>raytracing</title>
+
+	
+<script type="module" nonce="P66dZfnHH2F3w4TmG05J6Q==">
+import init, * as bindings from 'https://raytracer.pages.dev/raytracer-6f4e009e671796da.js';
+const wasm = await init('https://raytracer.pages.dev/raytracer-6f4e009e671796da_bg.wasm');
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+	<base href="https://raytracer.pages.dev/" />
+
+	<link rel="icon" href="https://raytracer.pages.dev/favicon-f402c8741ce815ec.ico" integrity="sha384&#x2D;jNOAE6jgE03LznIulCTVP6BH4NrTuROFjP9wj8bV1UUMJKtZAvstFpIAP3PDcFpx"/>
+
+	
+	
+	
+	
+	
+	
+
+	<link rel="manifest" href="manifest.json">
+	<link rel="apple-touch-icon" href="icon_ios_touch_192.png">
+	<meta name="theme-color" media="(prefers-color-scheme: light)" content="white">
+	<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#404040">
+
+	<style>
+		/* no delay on touchscreens */
+		html {
+			touch-action: manipulation;
+		}
+
+		/* colors outside of egui canvas */
+		body {
+			background: #909090;
+		}
+		@media (prefers-color-scheme: dark) {
+			body {
+				background: #404040;
+			}
+		}
+
+		/* allow canvas to fill entire page */
+		html,
+		body {
+			overflow: hidden;
+			margin: 0 !important;
+			padding: 0 !important;
+			height: 100%;
+			width: 100%;
+		}
+
+		/* canvas in center-top */
+		canvas {
+			margin-right: auto;
+			margin-left: auto;
+			display: block;
+			position: absolute;
+			top: 0%;
+			left: 50%;
+			transform: translate(-50%, 0%);
+		}
+
+		.centered {
+			margin-right: auto;
+			margin-left: auto;
+			display: block;
+			position: absolute;
+			top: 50%;
+			left: 50%;
+			transform: translate(-50%, -50%);
+			color: #f0f0f0;
+			font-size: 24px;
+			font-family: Ubuntu-Light, Helvetica, sans-serif;
+			text-align: center;
+		}
+
+		.lds-dual-ring {
+			display: inline-block;
+			width: 24px;
+			height: 24px;
+		}
+
+		.lds-dual-ring:after {
+			content: " ";
+			display: block;
+			width: 24px;
+			height: 24px;
+			margin: 0px;
+			border-radius: 50%;
+			border: 3px solid #fff;
+			border-color: #fff transparent #fff transparent;
+			animation: lds-dual-ring 1.2s linear infinite;
+		}
+
+		@keyframes lds-dual-ring {
+			0% {
+				transform: rotate(0deg);
+			}
+
+			100% {
+				transform: rotate(360deg);
+			}
+		}
+
+	</style>
+
+<link rel="modulepreload" href="https://raytracer.pages.dev/raytracer-6f4e009e671796da.js" crossorigin=anonymous integrity="sha384-CqirYi+4PySI7sBw7vbTszUWXPhzd+NbAvxBP5nw8Xeo5KVzdMOgrdoAbZvcBRCW">
+<link rel="preload" href="https://raytracer.pages.dev/raytracer-6f4e009e671796da_bg.wasm" crossorigin=anonymous integrity="sha384-MDTY6BujrckqdCMiTrxeYqpvd3hlZSDqS83SCfz3+M01bDZ8Km6+0C3GqwvKvTiS" as="fetch" type="application/wasm"></head>
+
+<body>
+	<!-- make sure ID matches with the hardcoded one in main.rs -->
+	<canvas id="gl_canvas"></canvas>
+
+	<!-- register service worker: caches wasm/js scripts for offline use (PWA functionality). -->
+	<!-- force refresh to load the latest files instead of cached files -->
+	<script>
+		// disable caching during development so that we always view the latest version.
+		if ('serviceWorker' in navigator && window.location.hash !== "#dev") {
+			window.addEventListener('load', function () {
+				navigator.serviceWorker.register('sw.js');
+			});
+		}
+	</script>
+</body>
+
+</html>
+
+<!-- Powered by egui: https://github.com/emilk/egui/ -->
