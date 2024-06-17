@@ -1,4 +1,4 @@
-max_width = 80
+max_width = 84
 hard_tabs = true
 tab_spaces = 2
 match_block_trailing_comma = true

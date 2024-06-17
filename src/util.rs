@@ -7,7 +7,7 @@ macro_rules! selectable_values {
 	(
 		target = $ref:expr,
 		focused = $focused:expr,
-		clicked = $clicked:expr,
+		changed = $changed:expr,
 		[$($alternative:expr),+ $(,)?]
 		$(,)?
 	) => {
@@ -15,7 +15,7 @@ macro_rules! selectable_values {
 			$(
 				let value = ui.selectable_value(&mut $ref, $alternative, format!("{}", $alternative));
 				$focused |= value.has_focus();
-				$clicked |= value.changed();
+				$changed |= value.changed();
 			)+
 		}
 	};
@@ -112,9 +112,12 @@ pub fn fill_50<T: Copy + Default>(sl: &[T]) -> [T; 50] {
 	a
 }
 
-pub trait Reset {
-	fn reset(&mut self) where Self: Default {
-		*self = Self::default();
+// for objects that need to "reset" to a non-`Default` state
+pub trait Reset where Self: Sized {
+	fn reset_state() -> Self;
+
+	fn reset(&mut self) {
+		*self = Self::reset_state();
 	}
 }
 

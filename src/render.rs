@@ -135,17 +135,17 @@ impl Raytracer {
 	pub fn new(gl: &Context, camera: &Camera, scr_size: glm::Vec2) -> Self {
 		unsafe {
 			// {{{ create shader programs
-			let prepass_program = gl.create_program().expect("create program failed");
+			let ray_dirs_program = gl.create_program().expect("create program failed");
 			let program = gl.create_program().expect("create program failed");
 
 			compile_shaders(
 				gl,
-				prepass_program,
-				fragment_shader!("prepass_fsh.glsl"),
+				ray_dirs_program,
+				fragment_shader!("ray_dirs_fsh.glsl"),
 			);
 			compile_shaders(gl, program, fragment_shader!("fsh.glsl"));
 
-			let prepass_verts = gl
+			let ray_dirs_verts = gl
 				.create_vertex_array()
 				.expect("create vertex array failed");
 			let verts = gl
@@ -153,12 +153,12 @@ impl Raytracer {
 				.expect("create vertex array failed");
 			// }}}
 
-			// {{{ create prepass FBO and texture
-			let prepass_fbo = gl.create_framebuffer().expect("create FBO failed");
-			let prepass_texture = gl.create_texture().expect("create texture failed");
+			// {{{ create accumulation FBO
+			let accumulation_fbo = gl.create_framebuffer().expect("create FBO failed");
+			let accumulation_texture = gl.create_texture().expect("create texture failed");
 
-			gl.bind_texture(glow::TEXTURE_2D, Some(prepass_texture));
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(prepass_fbo));
+			gl.bind_texture(glow::TEXTURE_2D, Some(accumulation_texture));
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(accumulation_fbo));
 			gl.tex_image_2d(
 				glow::TEXTURE_2D,
 				0,
@@ -184,7 +184,51 @@ impl Raytracer {
 				glow::FRAMEBUFFER,
 				glow::COLOR_ATTACHMENT0,
 				glow::TEXTURE_2D,
-				Some(prepass_texture),
+				Some(accumulation_texture),
+				0,
+			);
+			gl.bind_texture(glow::TEXTURE_2D, None);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+
+			let fbo_status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+			assert!(
+				fbo_status == glow::FRAMEBUFFER_COMPLETE,
+				"framebuffer incomplete: {fbo_status}"
+			);
+			// }}}
+
+			// {{{ create prepass FBO and texture
+			let ray_dirs_fbo = gl.create_framebuffer().expect("create FBO failed");
+			let ray_dirs_texture = gl.create_texture().expect("create texture failed");
+
+			gl.bind_texture(glow::TEXTURE_2D, Some(ray_dirs_texture));
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(ray_dirs_fbo));
+			gl.tex_image_2d(
+				glow::TEXTURE_2D,
+				0,
+				glow::RGBA32UI as i32,
+				scr_size.x as i32,
+				scr_size.y as i32,
+				0,
+				glow::RGBA_INTEGER,
+				glow::UNSIGNED_INT,
+				None,
+			);
+			gl.tex_parameter_i32(
+				glow::TEXTURE_2D,
+				glow::TEXTURE_MIN_FILTER,
+				glow::NEAREST as i32,
+			);
+			gl.tex_parameter_i32(
+				glow::TEXTURE_2D,
+				glow::TEXTURE_MAG_FILTER,
+				glow::NEAREST as i32,
+			);
+			gl.framebuffer_texture_2d(
+				glow::FRAMEBUFFER,
+				glow::COLOR_ATTACHMENT0,
+				glow::TEXTURE_2D,
+				Some(ray_dirs_texture),
 				0,
 			);
 			gl.bind_texture(glow::TEXTURE_2D, None);
@@ -198,10 +242,10 @@ impl Raytracer {
 			// }}}
 
 			let mut this = Self {
-				ray_dirs_fbo: prepass_fbo,
-				ray_dirs_texture: prepass_texture,
-				ray_dirs_program: prepass_program,
-				ray_dirs_verts: prepass_verts,
+				ray_dirs_fbo,
+				ray_dirs_texture,
+				ray_dirs_program,
+				ray_dirs_verts,
 				program,
 				verts,
 
@@ -346,6 +390,7 @@ impl Raytracer {
 
 			if self.first_frame || data.scene.response.changed {
 				// {{{ scene
+				// general
 				gl.uniform_1_u32(
 					gl.get_uniform_location(self.program, "scene_selected")
 						.as_ref(),
@@ -358,42 +403,68 @@ impl Raytracer {
 				);
 
 				gl.uniform_1_u32_slice(
-					gl.get_uniform_location(self.program, "scene_obj_types")
+					gl.get_uniform_location(self.program, "scene_obj_type")
 						.as_ref(),
-					&fill_50(bytemuck::cast_slice(&data.scene.types)),
+					&fill_50(bytemuck::cast_slice(&data.scene.ty)),
+				);
+
+				// materials
+				gl.uniform_1_u32_slice(
+					gl.get_uniform_location(self.program, "scene_obj_mat_type")
+						.as_ref(),
+					&fill_50(bytemuck::cast_slice(&data.scene.mat_ty)),
 				);
 
 				gl.uniform_3_f32_slice(
-					gl.get_uniform_location(self.program, "scene_obj_mat_colors")
+					gl.get_uniform_location(self.program, "scene_obj_mat_color")
 						.as_ref(),
-					bytemuck::cast_slice(&fill_50(&data.scene.mat_colors)),
+					bytemuck::cast_slice(&fill_50(&data.scene.mat_color)),
 				);
 
-				gl.uniform_3_f32_slice(
+				gl.uniform_1_f32_slice(
 					gl.get_uniform_location(self.program, "scene_obj_mat_roughness")
 						.as_ref(),
 					&fill_50(&data.scene.mat_roughness),
 				);
 
+				gl.uniform_1_f32_slice(
+					gl.get_uniform_location(self.program, "scene_obj_mat_emissive_strength")
+						.as_ref(),
+					&fill_50(&data.scene.mat_emissive_strength),
+				);
+
+				gl.uniform_1_f32_slice(
+					gl.get_uniform_location(self.program, "scene_obj_mat_transmissive_opacity")
+						.as_ref(),
+					&fill_50(&data.scene.mat_transmissive_opacity),
+				);
+
+				gl.uniform_1_f32_slice(
+					gl.get_uniform_location(self.program, "scene_obj_mat_transmissive_ior")
+						.as_ref(),
+					&fill_50(&data.scene.mat_transmissive_ior),
+				);
+
+				// transforms
 				gl.uniform_matrix_4_f32_slice(
-					gl.get_uniform_location(self.program, "scene_transforms")
+					gl.get_uniform_location(self.program, "scene_transform")
 						.as_ref(),
 					false, // no transpose, it's already in column-major order
-					flatten_matrices(&fill_50(&data.scene.transforms)),
+					flatten_matrices(&fill_50(&data.scene.transform)),
 				);
 
 				gl.uniform_matrix_4_f32_slice(
-					gl.get_uniform_location(self.program, "scene_inv_transforms")
+					gl.get_uniform_location(self.program, "scene_inv_transform")
 						.as_ref(),
 					false, // no transpose, it's already in column-major order
-					flatten_matrices(&fill_50(&data.scene.inv_transforms)),
+					flatten_matrices(&fill_50(&data.scene.inv_transform)),
 				);
 
 				gl.uniform_matrix_4_f32_slice(
-					gl.get_uniform_location(self.program, "scene_normal_transforms")
+					gl.get_uniform_location(self.program, "scene_normal_transform")
 						.as_ref(),
 					false, // no transpose, it's already in column-major order
-					flatten_matrices(&fill_50(&data.scene.normal_transforms)),
+					flatten_matrices(&fill_50(&data.scene.normal_transform)),
 				);
 				// }}}
 			}
@@ -406,6 +477,14 @@ impl Raytracer {
 					data.settings.world.sky_color[0],
 					data.settings.world.sky_color[1],
 					data.settings.world.sky_color[2],
+				);
+
+				// sun color
+				gl.uniform_3_f32(
+					gl.get_uniform_location(self.program, "sun_color").as_ref(),
+					data.settings.world.sun_color[0],
+					data.settings.world.sun_color[1],
+					data.settings.world.sun_color[2],
 				);
 
 				// sun direction

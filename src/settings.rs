@@ -1,7 +1,8 @@
-use egui::{ComboBox, Slider};
+use egui::Slider;
 
 use crate::util::{AngleControl, Reset, UpdateResponse};
 
+// {{{ state
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -19,10 +20,10 @@ pub struct Settings {
 #[serde(default)]
 pub struct WorldSettings {
 	pub sun_size: f32,
-	pub sun_warmth: f32,
 	pub sun_strength: f32,
 	pub sun_rotation: f32,
 	pub sun_elevation: f32,
+	pub sun_color: [f32; 3],
 	pub sky_color: [f32; 3],
 }
 
@@ -30,10 +31,10 @@ impl Default for WorldSettings {
 	fn default() -> Self {
 		Self {
 			sun_size: 1.0,
-			sun_warmth: 5200.0,
 			sun_strength: 1.0,
 			sun_rotation: 45.0_f32.to_radians(),
 			sun_elevation: 45.0_f32.to_radians(),
+			sun_color: [1.0, 1.0, 1.0],
 			sky_color: [0.0, 0.0, 0.0],
 		}
 	}
@@ -87,8 +88,10 @@ impl std::fmt::Display for RenderMode {
 		}
 	}
 }
+// }}}
 
-#[derive(Clone, Copy, Default)]
+// {{{ response
+#[derive(Clone, Copy)]
 pub struct SettingsResponse {
 	pub focused: bool,
 	pub screenshot: bool,
@@ -97,13 +100,32 @@ pub struct SettingsResponse {
 
 	pub changed: bool,
 }
-impl Reset for SettingsResponse {}
+
+impl Default for SettingsResponse {
+	fn default() -> Self {
+	  Self {
+			focused: false,
+			screenshot: false,
+			save_data: false,
+			clear_data: false,
+			changed: true,
+		}
+	}
+}
+
+impl Reset for SettingsResponse {
+	fn reset_state() -> Self {
+	  Self {
+			changed: false,
+			..Default::default()
+		}
+	}
+}
+// }}}
 
 impl Settings {
 	pub fn window(&mut self, egui: &egui::Context, frame_index: u32) {
 		egui::Window::new("Settings")
-			.resizable(false)
-			.anchor(egui::Align2::LEFT_TOP, [16.0, 16.0])
 			.show(egui, |ui| {
 				// {{{ performance stats
 				let frametime = ui.input(|i| i.unstable_dt);
@@ -121,18 +143,15 @@ impl Settings {
 				// {{{ world settings
 				ui.collapsing("World settings", |ui| {
 					ui.horizontal(|ui| {
-						ui.label("Background color:");
+						ui.label("Sky color:");
 						let color = ui.color_edit_button_rgb(&mut self.world.sky_color);
 						self.update_response(color);
 					});
 
 					ui.horizontal(|ui| {
-						ui.label("Sun warmth:");
-						let slider = ui.add(
-							Slider::new(&mut self.world.sun_warmth, 1200.0..=12000.0)
-								.suffix("K"),
-						);
-						self.update_response(slider);
+						ui.label("Sun color:");
+						let color = ui.color_edit_button_rgb(&mut self.world.sun_color);
+						self.update_response(color);
 					});
 
 					ui.horizontal(|ui| {
@@ -161,14 +180,14 @@ impl Settings {
 					ui.horizontal(|ui| {
 						ui.label("Render mode:");
 						// {{{ select render mode
-						ComboBox::new("render_mode_selector", "")
+						egui::ComboBox::new("render_mode_selector", "")
 							.selected_text(format!("{}", self.render.mode))
 							.show_ui(
 								ui,
 								crate::selectable_values! {
 									target = self.render.mode,
 									focused = self.response.focused,
-									clicked = self.response.changed,
+									changed = self.response.changed,
 									[
 										RenderMode::Preview,
 										RenderMode::Realistic,

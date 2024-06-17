@@ -27,6 +27,10 @@ const uint RENDER_DEPTH     = 4u;
 
 const uint OBJ_TYPE_SPHERE = 0u;
 const uint OBJ_TYPE_BOX    = 1u;
+
+const uint MAT_TYPE_SOLID        = 0u;
+const uint MAT_TYPE_EMISSIVE     = 1u;
+const uint MAT_TYPE_TRANSMISSIVE = 2u;
 // }}}
 
 // 0x7f7f_fff = 0b0_11111110_11111111111111111111111 = 2139095039
@@ -39,24 +43,29 @@ uniform uint frame_index;
 // {{{ scene
 const uint MAX_SCENE_SIZE = 50u;
 
-// generic
+// general
 uniform uint scene_selected;
 uniform uint scene_size;
-uniform uint scene_obj_types[MAX_SCENE_SIZE];
+uniform uint scene_obj_type[MAX_SCENE_SIZE];
 
-// material
-uniform vec3 scene_obj_mat_colors[MAX_SCENE_SIZE];
+// materials
+uniform uint scene_obj_mat_type[MAX_SCENE_SIZE];
+uniform vec3 scene_obj_mat_color[MAX_SCENE_SIZE];
 uniform float scene_obj_mat_roughness[MAX_SCENE_SIZE];
+uniform float scene_obj_mat_emissive_strength[MAX_SCENE_SIZE];
+uniform float scene_obj_mat_transmissive_opacity[MAX_SCENE_SIZE];
+uniform float scene_obj_mat_transmissive_ior[MAX_SCENE_SIZE];
 
-// transform
-uniform mat4 scene_transforms[MAX_SCENE_SIZE];
-uniform mat4 scene_inv_transforms[MAX_SCENE_SIZE];
-uniform mat4 scene_normal_transforms[MAX_SCENE_SIZE];
+// transforms
+uniform mat4 scene_transform[MAX_SCENE_SIZE];
+uniform mat4 scene_inv_transform[MAX_SCENE_SIZE];
+uniform mat4 scene_normal_transform[MAX_SCENE_SIZE];
 // }}}
 
 // {{{ settings
 // world
 uniform vec3 sky_color;
+uniform vec3 sun_color;
 uniform vec3 sun_dir;
 uniform float sun_strength;
 
@@ -66,15 +75,41 @@ uniform uint highlight_selected;
 uniform uint max_bounces;
 // }}}
 
-// {{{ randomness
-// uint pcg_hash(uint input) {
-// 	uint state = input * 747796405u + 2891336453u;
-// 	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-// 	return (word >> 22u) ^ word;
+// {{{ random sampling
+// float hash(float seed) {
+// 	return fract(sin(seed) * 43758.5453);
 // }
 
-float rand_float(vec2 uv) {
-	return fract(sin(dot(uv, vec2(12.9898,78.233))) * 43758.5453123);
+float hash(float seed) {
+	seed = fract(seed * .1031);
+	seed *= seed + 33.33;
+	seed *= seed + seed;
+	return fract(seed);
+}
+
+vec3 random_in_hemisphere(float seed, vec3 normal) {
+	float a = hash(seed);
+	float b = hash(a);
+	float c = hash(b);
+
+	vec3 res = vec3(a, b, c) * 2.0 - 1.0;
+	if (dot(res, normal) < 0.0) {
+		res = -res;
+	}
+	return res;
+}
+
+// adapted from https://www.shadertoy.com/view/Xtt3Wn
+vec3 cos_dir(float seed, vec3 nor) {
+	vec3 tc = vec3(1.0 + nor.z - nor.xy * nor.xy, -nor.x * nor.y) / (1.0 + nor.z);
+	vec3 uu = vec3(tc.x, tc.z, -nor.x);
+	vec3 vv = vec3(tc.z, tc.y, -nor.y);
+
+	float u = hash(78.233 + seed);
+	float v = hash(10.873 + seed);
+	float a = 6.283185 * v;
+
+	return sqrt(u) * (cos(a) * uu + sin(a) * vv) + sqrt(1.0 - u) * nor;
 }
 // }}}
 
@@ -92,13 +127,8 @@ Ray transform(Ray src, mat4 m) {
 		transform(src.origin, m),
 		// the zero here is NOT a mistake. this is needed to transform dir correctly
 		// (discovered from https://iquilezles.org/articles/boxfunctions/)
-		// (see iq's ro and rd transforms)
 		normalize((m * vec4(src.dir, 0.0)).xyz)
 	);
-}
-
-vec3 pos_from_transform(mat4 m) {
-	return m[3].xyz;
 }
 
 vec3 pos_from_ray(Ray ray, float t) {
@@ -107,6 +137,11 @@ vec3 pos_from_ray(Ray ray, float t) {
 
 vec3 pos_from_ray(Ray ray, float t, mat4 m) {
 	return transform(ray.origin + ray.dir * t, m);
+}
+
+// extremely unrealistic approximation of fresnel
+float fresnel(vec3 incident, vec3 normal) {
+	return pow(max(dot(incident, normal) + 1, 0.0), 2) * 0.7;
 }
 // }}}
 
@@ -132,7 +167,7 @@ bool intersect_aabb(Ray ray, vec3 corner0, vec3 corner1) {
 // adapted from The Cherno's series
 RayHit intersect_sphere(Ray ray, uint i) {
 	// {{{
-	Ray local_ray = transform(ray, scene_inv_transforms[i]);
+	Ray local_ray = transform(ray, scene_inv_transform[i]);
 
 	// quadratic formula
 	// a is dot(dir, dir) which is 1 because dir is normalized
@@ -145,14 +180,20 @@ RayHit intersect_sphere(Ray ray, uint i) {
 	float d = b * b - c;
 	if (d < 0.0) return NO_HIT;
 
-	float local_distance = (-b - sqrt(d));
-	if (local_distance < 0.0) return NO_HIT;
+	float e = sqrt(d);
 
-	vec3 local_pos = pos_from_ray(local_ray, local_distance);
-	vec3 pos = transform(local_pos, scene_transforms[i]);
+	float local_tn = (-b - e);
+	// float local_tx = (-b + e);
+	// if (local_tn > local_tx || local_tx < 0.0) return NO_HIT;
+	if (local_tn < 0.0) return NO_HIT;
+
+	// float local_t = (local_tn > 0.0) ? local_tx : local_tn
+
+	vec3 local_pos = pos_from_ray(local_ray, local_tn);
+	vec3 pos = transform(local_pos, scene_transform[i]);
 	// in local space, the sphere is centered on the origin and has radius 1
 	// the local position of the ray hit is automatically equal to the local normal
-	vec3 normal = transform_n(local_pos, scene_normal_transforms[i]);
+	vec3 normal = transform_n(local_pos, scene_normal_transform[i]);
 	float distance = distance(ray.origin, pos);
 
 	return RayHit(true, i, pos, normal, distance);
@@ -162,7 +203,7 @@ RayHit intersect_sphere(Ray ray, uint i) {
 // adapted from https://iquilezles.org/articles/intersectors/
 RayHit intersect_box(Ray ray, uint i) {
 	// {{{
-	Ray local_ray = transform(ray, scene_inv_transforms[i]);
+	Ray local_ray = transform(ray, scene_inv_transform[i]);
 
 	vec3 inv = 1.0 / local_ray.dir;
 	vec3 n = inv * local_ray.origin;
@@ -170,18 +211,39 @@ RayHit intersect_box(Ray ray, uint i) {
 	vec3 t1 = -n - k;
 	vec3 t2 = -n + k;
 
-	// near and far
+	// enter and exit
 	float local_tn = max(max(t1.x, t1.y), t1.z);
-	float local_tf = min(min(t2.x, t2.y), t2.z);
+	float local_tx = min(min(t2.x, t2.y), t2.z);
 
-	if (local_tn > local_tf || local_tf < 0.0 || local_tn < 0.0) return NO_HIT;
+	if (local_tn > local_tx || local_tx < 0.0 || local_tn < 0.0) return NO_HIT;
 
-	vec3 pos = pos_from_ray(local_ray, local_tn, scene_transforms[i]);
+	vec3 pos = pos_from_ray(local_ray, local_tn, scene_transform[i]);
 	vec3 normal = transform_n(
 		step(vec3(local_tn), t1) * -sign(local_ray.dir),
-		scene_normal_transforms[i]
+		scene_normal_transform[i]
 	);
-	float distance = distance(ray.origin, pos); // transformed
+	float distance = distance(ray.origin, pos);
+
+	return RayHit(true, i, pos, normal, distance);
+	// }}}
+}
+
+RayHit intersect_box_back(Ray ray, uint i) {
+	// {{{
+	Ray local_ray = transform(ray, scene_inv_transform[i]);
+	vec3 inv = 1.0 / local_ray.dir;
+	vec3 t2 = -(inv * local_ray.origin) + abs(inv);
+
+	// exit only
+	float local_tx = min(min(t2.x, t2.y), t2.z);
+	if (local_tx < 0.0) return NO_HIT;
+
+	vec3 pos = pos_from_ray(local_ray, local_tx, scene_transform[i]);
+	vec3 normal = transform_n(
+		step(t2, vec3(local_tx)) * -sign(local_ray.dir),
+		scene_normal_transform[i]
+	);
+	float distance = distance(ray.origin, pos);
 
 	return RayHit(true, i, pos, normal, distance);
 	// }}}
@@ -189,7 +251,7 @@ RayHit intersect_box(Ray ray, uint i) {
 // }}}
 
 RayHit intersect_obj(Ray ray, uint i) {
-	switch (scene_obj_types[i]) {
+	switch (scene_obj_type[i]) {
 		case OBJ_TYPE_SPHERE:
 			return intersect_sphere(ray, i);
 		case OBJ_TYPE_BOX:
@@ -199,10 +261,7 @@ RayHit intersect_obj(Ray ray, uint i) {
 
 RayHit intersect_world(Ray ray) {
 	RayHit hit = NO_HIT;
-	for (uint i = 0u; i < MAX_SCENE_SIZE; i++) {
-		if (scene_size == i) {
-			break;
-		}
+	for (uint i = 0u; i < scene_size; i++) {
 		RayHit new_hit = intersect_obj(ray, i);
 		if (hit.distance > new_hit.distance) {
 			hit = new_hit;
@@ -211,31 +270,71 @@ RayHit intersect_world(Ray ray) {
 	return hit;
 }
 
-vec3 path_trace(RayHit hit) {
-	// TODO
-	return vec3(1);
+// vec3 path_trace(Ray ray, uint seed) {
+vec3 path_trace(Ray ray, float seed) {
+	vec3 light = vec3(0.0);
+	vec3 contribution = vec3(1.0);
+
+	for (uint i = 0u; i <= max_bounces; i++) {
+		RayHit hit = intersect_world(ray);
+
+		if (!hit.hit) {
+			light += contribution * sky_color;
+			break;
+		}
+
+		uint j = hit.obj;
+		uint m = scene_obj_mat_type[j];
+
+		if (m == MAT_TYPE_SOLID) {
+			contribution *= scene_obj_mat_color[j];
+		} else if (m == MAT_TYPE_EMISSIVE) {
+			light += contribution
+			       * scene_obj_mat_color[j]
+			       * scene_obj_mat_emissive_strength[j];
+			break;
+		} else if (m == MAT_TYPE_TRANSMISSIVE) {
+			// TODO
+		}
+
+		vec3 diffuse = random_in_hemisphere(seed, hit.normal);
+		// vec3 diffuse = cos_dir(seed, hit.normal);
+		vec3 specular = reflect(ray.dir, hit.normal);
+		float r = scene_obj_mat_roughness[hit.obj];
+		r = max(r - fresnel(ray.dir, hit.normal), 0.0);
+
+		ray.origin = hit.pos;
+		ray.dir = normalize((r * diffuse + (1.0 - r) * specular) * 0.5);
+	}
+
+	return light;
 }
 
-vec3 get_color(RayHit hit) {
-	if (hit.hit) {
-		switch (render_mode) {
-			case RENDER_PREVIEW:
-				float light_fac = clamp(dot(hit.normal, sun_dir) * sun_strength, 0.05, 1.0);
-				vec3 addend = (highlight_selected == 1u) && (hit.obj == scene_selected)
-							? vec3(0.4, 0.2, 0.1)
-							: vec3(0.0);
-				return (scene_obj_mat_colors[hit.obj] * light_fac) + addend;
-			case RENDER_REALISTIC:
-				return path_trace(hit);
-			case RENDER_POSITION:
-				return hit.pos / 2.0 + 0.5;
-			case RENDER_NORMAL:
-				return hit.normal / 2.0 + 0.5;
-			case RENDER_DEPTH:
-				return vec3(hit.distance / 100.0);
-		}
-	} else {
+// vec3 get_color(Ray primary, uint seed) {
+vec3 get_color(Ray primary, float seed) {
+	if (render_mode == RENDER_REALISTIC) {
+		return path_trace(primary, seed);
+	}
+
+	RayHit hit = intersect_world(primary);
+
+	if (!hit.hit) {
 		return sky_color;
+	}
+	
+	switch (render_mode) {
+		case RENDER_PREVIEW:
+			vec3 light_fac = dot(hit.normal, sun_dir) * sun_strength * sun_color;
+			vec3 addend = (highlight_selected == 1u) && (hit.obj == scene_selected)
+						? vec3(0.4, 0.2, 0.1)
+						: vec3(0.0);
+			return (scene_obj_mat_color[hit.obj] * light_fac) + addend;
+		case RENDER_POSITION:
+			return hit.pos / 2.0 + 0.5;
+		case RENDER_NORMAL:
+			return hit.normal / 2.0 + 0.5;
+		case RENDER_DEPTH:
+			return vec3(hit.distance / 100.0);
 	}
 }
 
@@ -246,11 +345,11 @@ Ray primary_ray(vec2 uv) {
 
 void main() {
 	vec2 uv = gl_FragCoord.xy / scr_size;
+	float seed = (uv.x + uv.y) * float(frame_index);
 
-	uint i = 0u;
+	// TODO: randomly skew a tiny bit for free "anti aliasing"
 	Ray primary = primary_ray(uv);
-	RayHit hit = intersect_world(primary);
-	vec3 color = pow(get_color(hit), vec3(1.0 / 2.2));
+	vec3 color = pow(get_color(primary, seed), vec3(1.0 / 2.2));
 	out_color = vec4(color, 1.0);
 
 	// out_color = vec4(vec3(rand_float(uv)), 1.0);
