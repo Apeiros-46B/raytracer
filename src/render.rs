@@ -32,6 +32,8 @@ pub struct Raytracer {
 	first_frame: bool,
 	using_texture_0: bool,
 	pub frame_index: u32,
+
+	pub force_scr_size: bool,
 }
 
 // {{{ shader compilation boilerplate
@@ -88,10 +90,22 @@ unsafe fn compile_shaders(
 }
 // }}}
 
+#[cfg(not(target = "wasm32"))]
+fn scale() -> f32 {
+	1.0
+}
+
+#[cfg(target = "wasm32")]
+#[wasm_bindgen]
+fn scale() -> f32 {
+	web_sys::window().unwrap().device_pixel_ratio() as f32
+}
+
 impl RaytracingApp {
 	pub fn paint(&mut self, ui: &mut egui::Ui, ui_focused: bool) {
 		let scr = ui.clip_rect();
-		let scr_size = scr.size();
+		let scr_size = glm::vec2(scr.size().x, scr.size().y) / scale();
+
 		let raytracer_mutex = self.renderer.clone();
 		let data_mutex = self.data.clone();
 		let input = ui.input(|i| i.clone());
@@ -105,7 +119,6 @@ impl RaytracingApp {
 					let mut data = data_mutex.lock();
 
 					let gl = painter.gl();
-					let scr_size = glm::vec2(scr_size.x, scr_size.y);
 
 					raytracer.set_scr_size(gl, &mut data.camera, scr_size);
 
@@ -127,7 +140,7 @@ impl RaytracingApp {
 						// }}}
 					}
 
-					if data.settings.response.changed {
+					if data.settings.response.changed || data.scene.response.changed {
 						raytracer.frame_index = 1;
 						raytracer.clear_textures(gl);
 					}
@@ -231,6 +244,8 @@ impl Raytracer {
 
 				// this starts at one to avoid division by zero
 				frame_index: 1,
+
+				force_scr_size: false,
 			};
 			// initial ray direction calculation
 			this.calculate_ray_dirs(gl, camera);
@@ -285,26 +300,29 @@ impl Raytracer {
 
 			// which texture to sample from (the one that isn't being rendered to)
 			gl.active_texture(glow::TEXTURE1);
-			gl.bind_texture(glow::TEXTURE_2D, Some(
-				if self.using_texture_0 {
+			gl.bind_texture(
+				glow::TEXTURE_2D,
+				Some(if self.using_texture_0 {
 					self.accumulation_texture_1
 				} else {
 					self.accumulation_texture_0
-				}
-			));
+				}),
+			);
 
 			// draw into accumulation buffer
 			gl.bind_vertex_array(Some(self.verts));
 			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.accumulation_fbo));
 
 			// unbind the other texture (the one that is being sampled)
-			framebuffer_texture(gl, if self.using_texture_0 {
-				self.accumulation_texture_0
-			} else {
-				self.accumulation_texture_1
-			});
+			framebuffer_texture(
+				gl,
+				if self.using_texture_0 {
+					self.accumulation_texture_0
+				} else {
+					self.accumulation_texture_1
+				},
+			);
 
-			// gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
 			// unbind
@@ -373,7 +391,9 @@ impl Raytracer {
 		camera: &mut Camera,
 		new_scr_size: glm::Vec2,
 	) {
-		if self.scr_size == new_scr_size {
+		if self.force_scr_size {
+			self.force_scr_size = false;
+		} else if self.scr_size == new_scr_size {
 			return;
 		}
 
@@ -406,6 +426,7 @@ impl Raytracer {
 			framebuffer_texture(gl, self.accumulation_texture_1);
 			gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
 			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 		}
 	}
 	// }}}
@@ -467,6 +488,13 @@ impl Raytracer {
 				data.camera.pos.x,
 				data.camera.pos.y,
 				data.camera.pos.z,
+			);
+
+			gl.uniform_3_f32(
+				gl.get_uniform_location(self.program, "camera_dir").as_ref(),
+				data.camera.forward_dir.x,
+				data.camera.forward_dir.y,
+				data.camera.forward_dir.z,
 			);
 
 			gl.uniform_1_u32(
@@ -608,8 +636,7 @@ impl Raytracer {
 				);
 
 				gl.uniform_1_u32(
-					gl.get_uniform_location(self.program, "accumulate")
-						.as_ref(),
+					gl.get_uniform_location(self.program, "accumulate").as_ref(),
 					data.settings.render.accumulate as u32,
 				);
 
@@ -632,6 +659,7 @@ impl Raytracer {
 	}
 }
 
+// {{{ gl helpers
 unsafe fn screen_sized_texture(gl: &Context, scr_size: glm::Vec2, params: bool) {
 	gl.tex_image_2d(
 		glow::TEXTURE_2D,
@@ -649,12 +677,12 @@ unsafe fn screen_sized_texture(gl: &Context, scr_size: glm::Vec2, params: bool) 
 		gl.tex_parameter_i32(
 			glow::TEXTURE_2D,
 			glow::TEXTURE_MIN_FILTER,
-			glow::NEAREST as i32,
+			glow::LINEAR as i32,
 		);
 		gl.tex_parameter_i32(
 			glow::TEXTURE_2D,
 			glow::TEXTURE_MAG_FILTER,
-			glow::NEAREST as i32,
+			glow::LINEAR as i32,
 		);
 	}
 }
@@ -668,3 +696,4 @@ unsafe fn framebuffer_texture(gl: &Context, texture: Texture) {
 		0,
 	);
 }
+// }}}

@@ -39,13 +39,12 @@ const uint MAT_TYPE_TRANSMISSIVE = 2u;
 
 // 0x7f7f_fff = 0b0_11111110_11111111111111111111111 = 2139095039
 const float MAX_FLOAT = intBitsToFloat(2139095039);
-const float PI = 3.14159;
-const vec3 CAMERA_UP = vec3(0.0, 1.0, 0.0);
+const float PI = radians(180.0);
 
 uniform vec2 scr_size;
 uniform vec3 camera_pos;
-uniform vec3 camera_dir;
 uniform uint frame_index;
+uniform uint accumulate;
 
 // {{{ scene
 const uint MAX_SCENE_SIZE = 50u;
@@ -78,20 +77,11 @@ uniform float sun_strength;
 
 // render
 uniform uint render_mode;
-uniform uint accumulate;
 uniform uint highlight_selected;
 uniform uint max_bounces;
 // }}}
 
 // {{{ random sampling
-// float hash(float seed) {
-// 	return fract(sin(seed) * 43758.5453);
-// }
-
-float map_range(float a, float lo, float hi) {
-	return (a * (hi - lo)) + lo;
-}
-
 float hash(float p) {
 	p = fract(p * .1031);
 	p *= p + 33.33;
@@ -126,8 +116,7 @@ vec3 random_in_hemisphere(float seed, vec3 normal) {
 // adapted from https://www.shadertoy.com/view/Xtt3Wn
 vec3 cos_dir(float seed, vec3 nor) {
 	// seed should be between zero and one
-	seed = fract(seed);
-	// vec3 tc = vec3(1.0 + nor.z - nor.xy * nor.xy, -nor.x * nor.y) / (0.9999 + nor.z);
+	seed = hash(seed);
 	vec3 tc = vec3(1.0 + nor.z - nor.xy * nor.xy, -nor.x * nor.y) / (1.0 + nor.z);
 	vec3 uu = vec3(tc.x, tc.z, -nor.x);
 	vec3 vv = vec3(tc.z, tc.y, -nor.y);
@@ -137,6 +126,19 @@ vec3 cos_dir(float seed, vec3 nor) {
 	float a = 6.283185 * v;
 
 	return normalize(sqrt(u) * (cos(a) * uu + sin(a) * vv) + sqrt(1.0 - u) * nor);
+}
+
+// adapted from https://www.shadertoy.com/view/fdS3zw
+vec3 cos_smp_hemi(float seed, vec3 normal) {
+	vec2 u = hash2(seed);
+
+	float r = sqrt(u.x);
+	float theta = 2.0 * PI * u.y;
+
+	vec3 B = normalize(cross(normal, vec3(0.0,1.0,1.0)));
+	vec3 T = cross(B, normal);
+
+	return normalize(r * sin(theta) * B + sqrt(1.0 - u.x) * normal + r * cos(theta) * T);
 }
 // }}}
 
@@ -255,27 +257,6 @@ RayHit intersect_box(Ray ray, uint i) {
 	return RayHit(true, i, pos, normal, distance);
 	// }}}
 }
-
-RayHit intersect_box_back(Ray ray, uint i) {
-	// {{{
-	Ray local_ray = transform(ray, scene_inv_transform[i]);
-	vec3 inv = 1.0 / local_ray.dir;
-	vec3 t2 = -(inv * local_ray.origin) + abs(inv);
-
-	// exit only
-	float local_tx = min(min(t2.x, t2.y), t2.z);
-	if (local_tx < 0.0) return NO_HIT;
-
-	vec3 pos = pos_from_ray(local_ray, local_tx, scene_transform[i]);
-	vec3 normal = transform_n(
-		step(t2, vec3(local_tx)) * -sign(local_ray.dir),
-		scene_normal_transform[i]
-	);
-	float distance = distance(ray.origin, pos);
-
-	return RayHit(true, i, pos, normal, distance);
-	// }}}
-}
 // }}}
 
 RayHit intersect_obj(Ray ray, uint i) {
@@ -316,27 +297,34 @@ vec3 path_trace(Ray ray, float seed) {
 
 		if (m == MAT_TYPE_SOLID) {
 			contribution *= scene_obj_mat_color[j];
-			if (i == max_bounces) {
-				light += contribution * scene_obj_mat_color[j] * sky_color;
-			}
+			// hacky:
+			// if (i == max_bounces) {
+			// 	light += contribution * scene_obj_mat_color[j] * sky_color;
+			// }
 		} else if (m == MAT_TYPE_EMISSIVE) {
 			light += contribution
 			       * scene_obj_mat_color[j]
 			       * scene_obj_mat_emissive_strength[j];
 			break;
 		} else if (m == MAT_TYPE_TRANSMISSIVE) {
-			// TODO
+			// TODO: implement glass
 		}
 
-		vec3 diffuse = random_in_hemisphere(seed, hit.normal);
-		// vec3 diffuse = cos_dir(seed, hit.normal);
+		// vec3 diffuse = random_in_hemisphere(seed, hit.normal);
+		vec3 diffuse = cos_dir(seed, hit.normal);
+		// vec3 diffuse = cos_smp_hemi(seed, hit.normal);
 		vec3 specular = reflect(ray.dir, hit.normal);
 		float r = scene_obj_mat_roughness[hit.obj];
+		// TODO: smoother fresnel
 		r = max(r - fresnel(ray.dir, hit.normal), 0.0);
 
 		ray.origin = hit.pos;
 		ray.dir = normalize((r * diffuse + (1.0 - r) * specular) * 0.5);
+		// ray.dir = diffuse;
 	}
+
+	// TODO: fix weird lighting issue/sampling bias
+	// (see ceiling on cornell box being brighter in some spots)
 
 	return (render_mode == RENDER_RAY_DIR) ? (ray.dir * 0.5 + 0.5) : light;
 }
@@ -383,18 +371,11 @@ void main() {
 	float seed = hash(hash(gl_FragCoord.xy) * float(frame_index));
 	vec2 uv = gl_FragCoord.xy / scr_size;
 
+	// TODO: randomly skew a tiny bit for free "anti aliasing"
 	Ray primary = primary_ray(uv);
-
-	// "antialias" by skewing the ray direction by a small random offset
-	vec2 ofs = hash2(seed) * 2.0 - 1.0;
-	primary.dir += (cross(camera_dir, CAMERA_UP) * ofs.x / 2000.0);
-	primary.dir += (CAMERA_UP * ofs.y / 2000.0);
-
 	vec3 color = get_color(primary, seed);
 	if (frame_index > 1u && accumulate == 1u) {
 		color += uintBitsToFloat(texture(image, uv).rgb);
 	}
-
-	// encode into framebuffer (float format isn't color-renderable);
 	out_color = floatBitsToUint(vec4(color, 1.0));
 }

@@ -77,6 +77,7 @@ pub enum RenderMode {
 	Depth = 4,
 	Fresnel = 5,
 	Roughness = 6,
+	RayDir = 7,
 }
 
 impl std::fmt::Display for RenderMode {
@@ -89,6 +90,7 @@ impl std::fmt::Display for RenderMode {
 			Self::Depth     => write!(f, "Distance (debug)"),
 			Self::Fresnel   => write!(f, "Fresnel (debug)"),
 			Self::Roughness => write!(f, "Roughness (debug)"),
+			Self::RayDir       => write!(f, "Ray direction (debug)"),
 		}
 	}
 }
@@ -132,15 +134,17 @@ impl Settings {
 		egui::Window::new("Settings").show(egui, |ui| {
 			// {{{ performance stats
 			let frametime = ui.input(|i| i.unstable_dt);
-			ui.label(format!(
-				"Frametime: {:.4}ms ({} FPS)",
-				(frametime * 1000.0),
-				(1.0 / frametime).round(),
-			));
+			ui.horizontal(|ui| {
+				ui.label(format!(
+					"Frametime: {:.4}ms ({} FPS)",
+					(frametime * 1000.0),
+					(1.0 / frametime).round(),
+				));
 
-			if self.render.mode == RenderMode::Realistic && self.render.accumulate {
-				ui.label(format!("(sample {frame_index})"));
-			}
+				if self.render.mode == RenderMode::Realistic && self.render.accumulate {
+					ui.label(format!("(sample {frame_index})"));
+				}
+			});
 			// }}}
 
 			// {{{ world settings
@@ -199,13 +203,14 @@ impl Settings {
 									RenderMode::Depth,
 									RenderMode::Fresnel,
 									RenderMode::Roughness,
+									RenderMode::RayDir,
 								],
 							},
 						);
 				});
 				// }}}
 
-				if self.render.mode == RenderMode::Realistic {
+				{
 					let checkbox =
 						ui.checkbox(&mut self.render.accumulate, "Accumulate samples");
 					self.update_response(checkbox);
@@ -227,7 +232,7 @@ impl Settings {
 
 				ui.horizontal(|ui| {
 					ui.label("Max ray bounces:");
-					let slider = ui.add(Slider::new(&mut self.render.max_bounces, 1..=10));
+					let slider = ui.add(Slider::new(&mut self.render.max_bounces, 0..=20));
 					self.update_response(slider);
 				});
 

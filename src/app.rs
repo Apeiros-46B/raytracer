@@ -3,9 +3,7 @@ use std::sync::Arc;
 use egui::mutex::Mutex;
 use nalgebra_glm as glm;
 
-use crate::{
-	camera::Camera, render::Raytracer, scene::Scene, settings::Settings,
-};
+use crate::{camera::Camera, render::Raytracer, scene::Scene, settings::Settings};
 
 pub struct RaytracingApp {
 	pub renderer: Arc<Mutex<Raytracer>>,
@@ -118,6 +116,7 @@ impl eframe::App for RaytracingApp {
 		// clear data if requested
 		if settings_response.clear_data {
 			*data = self.default_data.clone();
+			self.renderer.lock().force_scr_size = true;
 		}
 
 		// fixes error with simultaneous mutable borrow of self field

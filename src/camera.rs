@@ -11,7 +11,7 @@ pub struct Camera {
 	far_clip: f32,
 
 	pub pos: Vec3,
-	forward_dir: Vec3,
+	pub forward_dir: Vec3,
 
 	proj: Mat4,
 	pub inv_proj: Mat4,

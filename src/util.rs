@@ -127,6 +127,10 @@ pub trait UpdateResponse {
 
 	fn update_response(&mut self, resp: egui::Response) {
 		self.set_focused(resp.has_focus());
+		// let cond = resp.changed() && (resp.lost_focus() || resp.drag_stopped());
 		self.set_changed(resp.changed());
+		// if cond {
+		// 	println!("Hi");
+		// }
 	}
 }
