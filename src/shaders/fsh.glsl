@@ -325,18 +325,22 @@ vec3 path_trace(Ray ray, float seed) {
 			       * scene_obj_mat_emissive_strength[j];
 			break;
 		} else if (m == MAT_TYPE_TRANSMISSIVE) {
-			// TODO
+			// TODO: implemennt glass
 		}
 
-		vec3 diffuse = random_in_hemisphere(seed, hit.normal);
-		// vec3 diffuse = cos_dir(seed, hit.normal);
+		// vec3 diffuse = random_in_hemisphere(seed, hit.normal);
+		vec3 diffuse = cos_dir(seed, hit.normal);
 		vec3 specular = reflect(ray.dir, hit.normal);
 		float r = scene_obj_mat_roughness[hit.obj];
+		// TODO: smoother fresnel
 		r = max(r - fresnel(ray.dir, hit.normal), 0.0);
 
 		ray.origin = hit.pos;
 		ray.dir = normalize((r * diffuse + (1.0 - r) * specular) * 0.5);
 	}
+
+	// TODO: fix weird lighting issue/sampling bias
+	// (see ceiling on cornell box being brighter in some spots)
 
 	return (render_mode == RENDER_RAY_DIR) ? (ray.dir * 0.5 + 0.5) : light;
 }
