@@ -41,6 +41,7 @@ const uint MAT_TYPE_TRANSMISSIVE = 2u;
 const float MAX_FLOAT = intBitsToFloat(2139095039);
 const float PI = 3.14159;
 const vec3 CAMERA_UP = vec3(0.0, 1.0, 0.0);
+const vec4 RAND_SCALE = vec4(443.897, 441.423, .0973, .1099);
 
 uniform vec2 scr_size;
 uniform vec3 camera_pos;
@@ -84,59 +85,41 @@ uniform uint max_bounces;
 // }}}
 
 // {{{ random sampling
-// float hash(float seed) {
-// 	return fract(sin(seed) * 43758.5453);
-// }
-
-float map_range(float a, float lo, float hi) {
-	return (a * (hi - lo)) + lo;
-}
-
-float hash(float p) {
+float rand1f(float p) {
 	p = fract(p * .1031);
 	p *= p + 33.33;
 	p *= p + p;
 	return fract(p);
 }
 
-float hash(vec2 p) {
-	vec3 p3  = fract(vec3(p.xyx) * .1031);
+float rand1f(vec2 p) {
+	// this (.1031) is better than using lygia's RAND_SCALE for some reason
+	vec3 p3 = fract(p.xyx * .1031);
 	p3 += dot(p3, p3.yzx + 33.33);
 	return fract((p3.x + p3.y) * p3.z);
 }
 
-vec2 hash2(float p) {
-	float h = hash(p);
-	return vec2(h, hash(h));
+vec2 rand2f(float p) {
+	vec3 p3 = fract(p * RAND_SCALE.xyz);
+	p3 += dot(p3, p3.yzx + 19.19);
+	return fract((p3.xx + p3.yz) * p3.zy);
 }
 
-vec3 random_in_hemisphere(float seed, vec3 normal) {
-	seed = hash(seed);
-	float a = hash(seed);
-	float b = hash(a);
-	float c = hash(b);
-
-	vec3 res = vec3(a, b, c) * 2.0 - 1.0;
-	if (dot(res, normal) < 0.0) {
-		res = -res;
-	}
-	return normalize(res);
+vec3 rand3f(float p) {
+	vec3 p3 = fract(p * RAND_SCALE.xyz);
+	p3 += dot(p3, p3.yzx + 19.19);
+	return fract((p3.xxy + p3.yzz) * p3.zyx);
 }
 
-// adapted from https://www.shadertoy.com/view/Xtt3Wn
-vec3 cos_dir(float seed, vec3 nor) {
-	// seed should be between zero and one
-	seed = fract(seed);
-	// vec3 tc = vec3(1.0 + nor.z - nor.xy * nor.xy, -nor.x * nor.y) / (0.9999 + nor.z);
-	vec3 tc = vec3(1.0 + nor.z - nor.xy * nor.xy, -nor.x * nor.y) / (1.0 + nor.z);
-	vec3 uu = vec3(tc.x, tc.z, -nor.x);
-	vec3 vv = vec3(tc.z, tc.y, -nor.y);
+// vec3 rand3f(float p) {
+// 	float a = rand1f(p);
+// 	float b = rand1f(a);
+// 	float c = rand1f(b);
+// 	return vec3(a, b, c);
+// }
 
-	float u = hash(78.233 + seed);
-	float v = hash(10.873 + seed);
-	float a = 6.283185 * v;
-
-	return normalize(sqrt(u) * (cos(a) * uu + sin(a) * vv) + sqrt(1.0 - u) * nor);
+vec3 cos_distrib_in_hemisphere(float seed, vec3 normal) {
+	return normal + normalize(rand3f(seed) * 2.0 - 1.0);
 }
 // }}}
 
@@ -328,8 +311,7 @@ vec3 path_trace(Ray ray, float seed) {
 			// TODO: implemennt glass
 		}
 
-		// vec3 diffuse = random_in_hemisphere(seed, hit.normal);
-		vec3 diffuse = cos_dir(seed, hit.normal);
+		vec3 diffuse = cos_distrib_in_hemisphere(seed, hit.normal);
 		vec3 specular = reflect(ray.dir, hit.normal);
 		float r = scene_obj_mat_roughness[hit.obj];
 		// TODO: smoother fresnel
@@ -384,16 +366,17 @@ Ray primary_ray(vec2 uv) {
 }
 
 void main() {
-	float seed = hash(hash(gl_FragCoord.xy) * float(frame_index));
+	float seed = rand1f(rand1f(gl_FragCoord.xy) * float(frame_index));
 	vec2 uv = gl_FragCoord.xy / scr_size;
 
 	Ray primary = primary_ray(uv);
 
 	// "antialias" by skewing the ray direction by a small random offset
-	vec2 ofs = hash2(seed) * 2.0 - 1.0;
-	primary.dir += (cross(camera_dir, CAMERA_UP) * ofs.x / 2000.0);
-	primary.dir += (CAMERA_UP * ofs.y / 2000.0);
+	vec2 ofs = (rand2f(seed) * 2.0 - 1.0) / 2000.0;
+	primary.dir += (cross(camera_dir, CAMERA_UP) * ofs.x);
+	primary.dir += (CAMERA_UP * ofs.y);
 
+	// vec3 color = rand3f(seed);
 	vec3 color = get_color(primary, seed);
 	if (frame_index > 1u && accumulate == 1u) {
 		color += uintBitsToFloat(texture(image, uv).rgb);
