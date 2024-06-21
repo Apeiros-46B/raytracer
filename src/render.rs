@@ -526,40 +526,37 @@ impl Raytracer {
 
 				// materials
 				gl.uniform_1_u32_slice(
-					gl.get_uniform_location(self.program, "scene_obj_mat_type")
+					gl.get_uniform_location(self.program, "scene_mat_type")
 						.as_ref(),
 					&fill_50(bytemuck::cast_slice(&data.scene.mat_ty)),
 				);
 
 				gl.uniform_3_f32_slice(
-					gl.get_uniform_location(self.program, "scene_obj_mat_color")
+					gl.get_uniform_location(self.program, "scene_mat_color")
 						.as_ref(),
 					bytemuck::cast_slice(&fill_50(&data.scene.mat_color)),
 				);
 
 				gl.uniform_1_f32_slice(
-					gl.get_uniform_location(self.program, "scene_obj_mat_roughness")
+					gl.get_uniform_location(self.program, "scene_mat_roughness")
 						.as_ref(),
 					&fill_50(&data.scene.mat_roughness),
 				);
 
 				gl.uniform_1_f32_slice(
-					gl.get_uniform_location(self.program, "scene_obj_mat_emissive_strength")
+					gl.get_uniform_location(self.program, "scene_mat_emissive_strength")
 						.as_ref(),
 					&fill_50(&data.scene.mat_emissive_strength),
 				);
 
 				gl.uniform_1_f32_slice(
-					gl.get_uniform_location(
-						self.program,
-						"scene_obj_mat_transmissive_opacity",
-					)
-					.as_ref(),
+					gl.get_uniform_location(self.program, "scene_mat_transmissive_opacity")
+						.as_ref(),
 					&fill_50(&data.scene.mat_transmissive_opacity),
 				);
 
 				gl.uniform_1_f32_slice(
-					gl.get_uniform_location(self.program, "scene_obj_mat_transmissive_ior")
+					gl.get_uniform_location(self.program, "scene_mat_transmissive_ior")
 						.as_ref(),
 					&fill_50(&data.scene.mat_transmissive_ior),
 				);
@@ -638,6 +635,11 @@ impl Raytracer {
 				gl.uniform_1_u32(
 					gl.get_uniform_location(self.program, "accumulate").as_ref(),
 					data.settings.render.accumulate as u32,
+				);
+
+				gl.uniform_1_u32(
+					gl.get_uniform_location(self.program, "samples_per_frame").as_ref(),
+					data.settings.render.samples_per_frame,
 				);
 
 				// highlight selected object

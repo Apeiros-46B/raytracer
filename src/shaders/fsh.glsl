@@ -41,7 +41,6 @@ const uint MAT_TYPE_TRANSMISSIVE = 2u;
 const float MAX_FLOAT = intBitsToFloat(2139095039);
 const float PI = 3.14159;
 const vec3 CAMERA_UP = vec3(0.0, 1.0, 0.0);
-const vec4 RAND_SCALE = vec4(443.897, 441.423, .0973, .1099);
 
 uniform vec2 scr_size;
 uniform vec3 camera_pos;
@@ -57,12 +56,12 @@ uniform uint scene_size;
 uniform uint scene_obj_type[MAX_SCENE_SIZE];
 
 // materials
-uniform uint scene_obj_mat_type[MAX_SCENE_SIZE];
-uniform vec3 scene_obj_mat_color[MAX_SCENE_SIZE];
-uniform float scene_obj_mat_roughness[MAX_SCENE_SIZE];
-uniform float scene_obj_mat_emissive_strength[MAX_SCENE_SIZE];
-uniform float scene_obj_mat_transmissive_opacity[MAX_SCENE_SIZE];
-uniform float scene_obj_mat_transmissive_ior[MAX_SCENE_SIZE];
+uniform uint scene_mat_type[MAX_SCENE_SIZE];
+uniform vec3 scene_mat_color[MAX_SCENE_SIZE];
+uniform float scene_mat_roughness[MAX_SCENE_SIZE];
+uniform float scene_mat_emissive_strength[MAX_SCENE_SIZE];
+uniform float scene_mat_transmissive_opacity[MAX_SCENE_SIZE];
+uniform float scene_mat_transmissive_ior[MAX_SCENE_SIZE];
 
 // transforms
 uniform mat4 scene_transform[MAX_SCENE_SIZE];
@@ -80,21 +79,29 @@ uniform float sun_strength;
 // render
 uniform uint render_mode;
 uniform uint accumulate;
+uniform uint samples_per_frame;
 uniform uint highlight_selected;
 uniform uint max_bounces;
 // }}}
 
 // {{{ random sampling
+// adapted from https://github.com/patriciogonzalezvivo/lygia/blob/main/generative/random.glsl
+const vec4 RAND_SCALE = vec4(443.897, 441.423, .0973, .1099);
+
+// for larger ranges
+const vec4 RAND_SCALE_HI = vec4(.1031, .1030, .0973, .1099);
+
 float rand1f(float p) {
-	p = fract(p * .1031);
+	p = fract(p * RAND_SCALE.x);
 	p *= p + 33.33;
 	p *= p + p;
 	return fract(p);
 }
 
 float rand1f(vec2 p) {
-	// this (.1031) is better than using lygia's RAND_SCALE for some reason
-	vec3 p3 = fract(p.xyx * .1031);
+	// this (.1031) is better than using lygia's low range RAND_SCALE
+	// (when used for camera ray skewing)
+	vec3 p3 = fract(p.xyx * RAND_SCALE_HI.x);
 	p3 += dot(p3, p3.yzx + 33.33);
 	return fract((p3.x + p3.y) * p3.z);
 }
@@ -111,15 +118,8 @@ vec3 rand3f(float p) {
 	return fract((p3.xxy + p3.yzz) * p3.zyx);
 }
 
-// vec3 rand3f(float p) {
-// 	float a = rand1f(p);
-// 	float b = rand1f(a);
-// 	float c = rand1f(b);
-// 	return vec3(a, b, c);
-// }
-
-vec3 cos_distrib_in_hemisphere(float seed, vec3 normal) {
-	return normal + normalize(rand3f(seed) * 2.0 - 1.0);
+vec3 cos_dist_in_hemi(float seed, vec3 normal) {
+	return normalize(normal + (rand3f(seed) * 2.0 - 1.0));
 }
 // }}}
 
@@ -145,14 +145,9 @@ vec3 pos_from_ray(Ray ray, float t) {
 	return ray.origin + ray.dir * t;
 }
 
-vec3 pos_from_ray(Ray ray, float t, mat4 m) {
-	return transform(ray.origin + ray.dir * t, m);
-}
-
 // extremely unrealistic approximation of fresnel
 float fresnel(vec3 incident, vec3 normal) {
 	return pow(clamp(dot(incident, normal) + 1.0, 0.0, 1.0), 3.0) * 0.3;
-	// return pow(smoothstep(0.0, 1.0, dot(incident, normal) + 1.0), 3.0) * 0.3;
 }
 // }}}
 
@@ -228,7 +223,7 @@ RayHit intersect_box(Ray ray, uint i) {
 
 	if (local_tn > local_tx || local_tx < 0.0 || local_tn < 0.0) return NO_HIT;
 
-	vec3 pos = pos_from_ray(local_ray, local_tn, scene_transform[i]);
+	vec3 pos = transform(pos_from_ray(local_ray, local_tn), scene_transform[i]);
 	vec3 normal = transform_n(
 		step(vec3(local_tn), t1) * -sign(local_ray.dir),
 		scene_normal_transform[i]
@@ -249,7 +244,7 @@ RayHit intersect_box_back(Ray ray, uint i) {
 	float local_tx = min(min(t2.x, t2.y), t2.z);
 	if (local_tx < 0.0) return NO_HIT;
 
-	vec3 pos = pos_from_ray(local_ray, local_tx, scene_transform[i]);
+	vec3 pos = transform(pos_from_ray(local_ray, local_tx), scene_transform[i]);
 	vec3 normal = transform_n(
 		step(t2, vec3(local_tx)) * -sign(local_ray.dir),
 		scene_normal_transform[i]
@@ -281,48 +276,48 @@ RayHit intersect_world(Ray ray) {
 	return hit;
 }
 
-// vec3 path_trace(Ray ray, uint seed) {
 vec3 path_trace(Ray ray, float seed) {
 	vec3 light = vec3(0.0);
 	vec3 contribution = vec3(1.0);
 
-	for (uint i = 0u; i <= max_bounces; i++) {
+	for (uint ray_n = 0u; ray_n <= max_bounces; ray_n++) {
 		RayHit hit = intersect_world(ray);
 
 		if (!hit.hit) {
 			light += contribution * sky_color;
+			light += contribution
+			       * sun_color
+						 * sun_strength * 100.0
+						 * step(0.005, max(dot(ray.dir, sun_dir) - 0.99, 0.0));
 			break;
 		}
 
-		uint j = hit.obj;
-		uint m = scene_obj_mat_type[j];
+		uint i = hit.obj;
+		uint m = scene_mat_type[i];
 
-		if (m == MAT_TYPE_SOLID) {
-			contribution *= scene_obj_mat_color[j];
-			if (i == max_bounces) {
-				light += contribution * scene_obj_mat_color[j] * sky_color;
-			}
+		if (highlight_selected == 1u && i == scene_selected) {
+			light += contribution * vec3(0.4, 0.2, 0.1);
+		} else if (m == MAT_TYPE_SOLID) {
+			contribution *= scene_mat_color[i];
 		} else if (m == MAT_TYPE_EMISSIVE) {
 			light += contribution
-			       * scene_obj_mat_color[j]
-			       * scene_obj_mat_emissive_strength[j];
+			       * scene_mat_color[i]
+			       * scene_mat_emissive_strength[i];
 			break;
 		} else if (m == MAT_TYPE_TRANSMISSIVE) {
-			// TODO: implemennt glass
+			// TODO: implement glass
 		}
 
-		vec3 diffuse = cos_distrib_in_hemisphere(seed, hit.normal);
-		vec3 specular = reflect(ray.dir, hit.normal);
-		float r = scene_obj_mat_roughness[hit.obj];
 		// TODO: smoother fresnel
-		r = max(r - fresnel(ray.dir, hit.normal), 0.0);
+		float r = max(scene_mat_roughness[i] - fresnel(ray.dir, hit.normal), 0.0);
+		r *= r; // square roughness, makes it feel more linear perceptually
 
-		ray.origin = hit.pos;
-		ray.dir = normalize((r * diffuse + (1.0 - r) * specular) * 0.5);
+		vec3 diffuse = cos_dist_in_hemi(seed, hit.normal);
+		vec3 specular = reflect(ray.dir, hit.normal);
+
+		ray.origin = hit.pos + hit.normal * 0.00001;
+		ray.dir = normalize(mix(specular, diffuse, r));
 	}
-
-	// TODO: fix weird lighting issue/sampling bias
-	// (see ceiling on cornell box being brighter in some spots)
 
 	return (render_mode == RENDER_RAY_DIR) ? (ray.dir * 0.5 + 0.5) : light;
 }
@@ -330,7 +325,23 @@ vec3 path_trace(Ray ray, float seed) {
 // vec3 get_color(Ray primary, uint seed) {
 vec3 get_color(Ray primary, float seed) {
 	if (render_mode == RENDER_REALISTIC || render_mode == RENDER_RAY_DIR) {
-		return path_trace(primary, seed);
+		vec3 color = vec3(0.0);
+
+		// average multiple samples in one frame
+		for (uint i = 0u; i < samples_per_frame; i++) {
+			Ray ray = primary;
+
+			// "antialias" by skewing the ray direction by a small random offset
+			vec2 ofs = (rand2f(seed) * 2.0 - 1.0) / 1000.0;
+			ray.dir += (cross(camera_dir, CAMERA_UP) * ofs.x);
+			ray.dir += (CAMERA_UP * ofs.y);
+
+			color += path_trace(ray, seed);
+			seed = rand1f(seed);
+		}
+		color /= float(samples_per_frame);
+
+		return color;
 	}
 
 	RayHit hit = intersect_world(primary);
@@ -341,11 +352,13 @@ vec3 get_color(Ray primary, float seed) {
 	
 	switch (render_mode) {
 		case RENDER_PREVIEW:
-			vec3 light_fac = dot(hit.normal, sun_dir) * sun_strength * sun_color;
-			vec3 addend = (highlight_selected == 1u) && (hit.obj == scene_selected)
-						? vec3(0.4, 0.2, 0.1)
-						: vec3(0.0);
-			return (scene_obj_mat_color[hit.obj] * light_fac) + addend;
+			vec3 color = vec3(0.3 - fresnel(primary.dir, hit.normal));
+			if (highlight_selected == 1u && hit.obj == scene_selected) {
+				color += vec3(0.2, 0.1, 0.05);
+			} else {
+				color *= scene_mat_color[hit.obj];
+			}
+			return color;
 		case RENDER_POSITION:
 			return hit.pos / 2.0 + 0.5;
 		case RENDER_NORMAL:
@@ -355,12 +368,12 @@ vec3 get_color(Ray primary, float seed) {
 		case RENDER_FRESNEL:
 			return vec3(fresnel(primary.dir, hit.normal));
 		case RENDER_ROUGHNESS:
-			float r = scene_obj_mat_roughness[hit.obj];
+			float r = scene_mat_roughness[hit.obj];
 			return vec3(max(r - fresnel(primary.dir, hit.normal), 0.0));
 	}
 }
 
-Ray primary_ray(vec2 uv) {
+Ray get_primary_ray(vec2 uv) {
 	uvec3 texel = texture(ray_dirs, uv).rgb;
 	return Ray(camera_pos, vec3(uintBitsToFloat(texel)));
 }
@@ -369,14 +382,7 @@ void main() {
 	float seed = rand1f(rand1f(gl_FragCoord.xy) * float(frame_index));
 	vec2 uv = gl_FragCoord.xy / scr_size;
 
-	Ray primary = primary_ray(uv);
-
-	// "antialias" by skewing the ray direction by a small random offset
-	vec2 ofs = (rand2f(seed) * 2.0 - 1.0) / 2000.0;
-	primary.dir += (cross(camera_dir, CAMERA_UP) * ofs.x);
-	primary.dir += (CAMERA_UP * ofs.y);
-
-	// vec3 color = rand3f(seed);
+	Ray primary = get_primary_ray(uv);
 	vec3 color = get_color(primary, seed);
 	if (frame_index > 1u && accumulate == 1u) {
 		color += uintBitsToFloat(texture(image, uv).rgb);

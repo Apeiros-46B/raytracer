@@ -35,7 +35,7 @@ impl Default for WorldSettings {
 			sun_rotation: 45.0_f32.to_radians(),
 			sun_elevation: 45.0_f32.to_radians(),
 			sun_color: [1.0, 1.0, 1.0],
-			sky_color: [0.0, 0.0, 0.0],
+			sky_color: [0.6, 0.6, 0.6],
 		}
 	}
 }
@@ -46,6 +46,7 @@ pub struct RenderSettings {
 	pub fov: f32,
 	pub mode: RenderMode,
 	pub accumulate: bool,
+	pub samples_per_frame: u32,
 	pub highlight: bool,
 	pub lock_camera: bool,
 	pub max_bounces: u32,
@@ -57,7 +58,8 @@ impl Default for RenderSettings {
 			fov: crate::camera::DEFAULT_FOV_DEG.to_radians(),
 			mode: RenderMode::default(),
 			accumulate: true,
-			highlight: true,
+			samples_per_frame: 1,
+			highlight: false,
 			lock_camera: false,
 			max_bounces: 5,
 		}
@@ -69,8 +71,8 @@ impl Default for RenderSettings {
 )]
 #[repr(u32)]
 pub enum RenderMode {
-	#[default]
 	Preview = 0,
+	#[default]
 	Realistic = 1,
 	Position = 2,
 	Normal = 3,
@@ -83,14 +85,14 @@ pub enum RenderMode {
 impl std::fmt::Display for RenderMode {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			Self::Preview   => write!(f, "Preview shading"),
+			Self::Preview => write!(f, "Preview shading"),
 			Self::Realistic => write!(f, "Realistic shading"),
-			Self::Position  => write!(f, "Position (debug)"),
-			Self::Normal    => write!(f, "Normal (debug)"),
-			Self::Depth     => write!(f, "Distance (debug)"),
-			Self::Fresnel   => write!(f, "Fresnel (debug)"),
+			Self::Position => write!(f, "Position (debug)"),
+			Self::Normal => write!(f, "Normal (debug)"),
+			Self::Depth => write!(f, "Distance (debug)"),
+			Self::Fresnel => write!(f, "Fresnel (debug)"),
 			Self::Roughness => write!(f, "Roughness (debug)"),
-			Self::RayDir       => write!(f, "Ray direction (debug)"),
+			Self::RayDir => write!(f, "Ray direction (debug)"),
 		}
 	}
 }
@@ -142,7 +144,7 @@ impl Settings {
 				));
 
 				if self.render.mode == RenderMode::Realistic && self.render.accumulate {
-					ui.label(format!("(sample {frame_index})"));
+					ui.label(format!("(sample {})", frame_index * self.render.samples_per_frame));
 				}
 			});
 			// }}}
@@ -216,6 +218,18 @@ impl Settings {
 					self.update_response(checkbox);
 				}
 
+				ui.horizontal(|ui| {
+					ui.label("Samples per frame");
+					let slider = ui.add(Slider::new(&mut self.render.samples_per_frame, 1..=32));
+					self.update_response(slider);
+				});
+
+				ui.horizontal(|ui| {
+					ui.label("Max ray bounces:");
+					let slider = ui.add(Slider::new(&mut self.render.max_bounces, 0..=20));
+					self.update_response(slider);
+				});
+
 				{
 					let checkbox =
 						ui.checkbox(&mut self.render.highlight, "Highlight selected object");
@@ -229,12 +243,6 @@ impl Settings {
 					);
 					self.update_response(checkbox);
 				}
-
-				ui.horizontal(|ui| {
-					ui.label("Max ray bounces:");
-					let slider = ui.add(Slider::new(&mut self.render.max_bounces, 0..=20));
-					self.update_response(slider);
-				});
 
 				ui.horizontal(|ui| {
 					ui.label("Field of view:");

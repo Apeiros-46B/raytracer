@@ -102,7 +102,7 @@ pub struct SceneResponse {
 
 impl Default for SceneResponse {
 	fn default() -> Self {
-	  Self {
+		Self {
 			focused: false,
 			changed: true,
 		}
@@ -111,7 +111,7 @@ impl Default for SceneResponse {
 
 impl Reset for SceneResponse {
 	fn reset_state() -> Self {
-	  Self {
+		Self {
 			changed: false,
 			..Default::default()
 		}
@@ -127,7 +127,7 @@ macro_rules! transform_ui_for {
 				&mut self,
 				ui: &mut Ui,
 				label: &'static str,
-				drag_speed: f64,
+				speed: f64,
 				obj_changed: &mut bool,
 				extra: impl Fn(DragValue) -> DragValue,
 			) {
@@ -137,7 +137,7 @@ macro_rules! transform_ui_for {
 						let drag = ui.add(extra(
 							DragValue::new(&mut self.$prop[self.selected].as_mut_slice()[i])
 								.prefix(format!("{axis}: "))
-								.speed(drag_speed),
+								.speed(speed),
 						));
 						*obj_changed |= drag.changed();
 						self.update_response(drag);
@@ -155,26 +155,25 @@ impl Scene {
 	}
 
 	pub fn window(&mut self, egui: &egui::Context) {
-		egui::Window::new("Scene")
-			.show(egui, |ui| {
-				let modal_open = self.rename_modal || self.delete_modal;
+		egui::Window::new("Scene").show(egui, |ui| {
+			let modal_open = self.rename_modal || self.delete_modal;
 
-				self.object_management_interface(ui, modal_open);
+			self.object_management_interface(ui, modal_open);
 
-				if self.len() > 0 {
-					if ui.button("Duplicate").clicked() {
-						self.duplicate_object();
-					}
-
-					ui.separator();
-
-					self.object_type_menu(ui);
-					self.object_renaming_button(egui, ui, modal_open);
-					self.object_deletion_button(egui, ui, modal_open);
-					self.transformation_interface(ui);
-					self.material_interface(ui);
+			if self.len() > 0 {
+				if ui.button("Duplicate").clicked() {
+					self.duplicate_object();
 				}
-			});
+
+				ui.separator();
+
+				self.object_type_menu(ui);
+				self.object_renaming_button(egui, ui, modal_open);
+				self.object_deletion_button(egui, ui, modal_open);
+				self.transformation_interface(ui);
+				self.material_interface(ui);
+			}
+		});
 	}
 
 	// {{{ select and add
@@ -186,7 +185,8 @@ impl Scene {
 					.selected_text(&self.name[self.selected])
 					.show_ui(ui, |ui| {
 						for i in 0..self.len() {
-							let value = ui.selectable_value(&mut &self.selected, &i, &self.name[i]);
+							let value =
+								ui.selectable_value(&mut &self.selected, &i, &self.name[i]);
 							if !modal_open && value.clicked() {
 								self.selected = i;
 							}
@@ -299,18 +299,16 @@ impl Scene {
 		}
 
 		ui.collapsing("Transform", |ui| {
-			let drag_speed = ui.input(|i| if i.modifiers.shift { 0.01 } else { 0.1 });
+			let speed = ui.input(|i| if i.modifiers.shift { 0.01 } else { 0.1 });
 
 			let mut changed = false;
 
-			self
-				.transform_position(ui, "Position", drag_speed, &mut changed, |drag| drag);
-			self.transform_rotation(ui, "Rotation", drag_speed, &mut changed, |drag| {
+			self.transform_position(ui, "Position", speed, &mut changed, |drag| drag);
+			self.transform_rotation(ui, "Rotation", speed, &mut changed, |drag| {
 				drag.angle()
 			});
-			self.transform_scale(ui, "Scale", drag_speed, &mut changed, |drag| {
-				drag.suffix("×")
-			});
+			self
+				.transform_scale(ui, "Scale", speed, &mut changed, |drag| drag.suffix("×"));
 
 			if changed {
 				self.recalc_transforms();
@@ -374,6 +372,7 @@ impl Scene {
 					});
 				},
 				MaterialType::Transmissive => {
+					self.roughness_slider(ui);
 					ui.horizontal(|ui| {
 						ui.label("Opacity:");
 						let slider = ui.add(Slider::new(
@@ -415,7 +414,7 @@ impl Scene {
 
 		let ty = ObjectType::Sphere;
 
-		self.name.push(format!("Unnamed {ty:?}"));
+		self.name.push(format!("{ty:?}"));
 		self.ty.push(ty);
 		self.position.push(vec3(0.0, 0.0, 0.0));
 		self.rotation.push(vec3(0.0, 0.0, 0.0));
@@ -520,6 +519,29 @@ impl Scene {
 			// - with inverted scale (reciprocal of scale factors)
 			self.normal_transform[i] = rot * inverse(&scl);
 		}
+	}
+
+	pub fn with_default_scene(mut self) -> Self {
+		self.new_object();
+
+		// pretty rough metallic sphere
+		self.mat_roughness[self.selected] = 0.6;
+
+		self.new_object();
+
+		// dark matte floor
+		self.name[self.selected] = "Floor".to_string();
+		self.ty[self.selected] = ObjectType::Box;
+		self.position[self.selected] = vec3(0.0, -1.001, 0.0);
+		self.rotation[self.selected] = vec3(0.0, 0.0, 0.0);
+		self.scale[self.selected] = vec3(1000.0, 0.001, 1000.0);
+
+		self.mat_color[self.selected] = [0.1, 0.1, 0.1];
+		self.mat_roughness[self.selected] = 1.0;
+
+		self.recalc_transforms();
+
+		self
 	}
 }
 
