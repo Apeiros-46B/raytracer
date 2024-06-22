@@ -119,7 +119,13 @@ vec3 rand3f(float p) {
 }
 
 vec3 cos_dist_in_hemi(float seed, vec3 normal) {
-	return normalize(normal + (rand3f(seed) * 2.0 - 1.0));
+	vec3 res = normalize(normal + (rand3f(seed) * 2.0 - 1.0));
+
+	if (dot(res, normal) < 0.0) {
+		res = -res;
+	}
+
+	return res;
 }
 // }}}
 
@@ -313,10 +319,13 @@ vec3 path_trace(Ray ray, float seed) {
 		r *= r; // square roughness, makes it feel more linear perceptually
 
 		vec3 diffuse = cos_dist_in_hemi(seed, hit.normal);
+		// vec3 diffuse = normalize(rand3f(seed) * 2.0 - 1.0);
 		vec3 specular = reflect(ray.dir, hit.normal);
 
 		ray.origin = hit.pos + hit.normal * 0.00001;
-		ray.dir = normalize(mix(specular, diffuse, r));
+		// ray.dir = normalize(mix(specular, diffuse, r));
+		ray.dir = normalize(diffuse);
+		// ray.dir = normalize(specular);
 	}
 
 	return (render_mode == RENDER_RAY_DIR) ? (ray.dir * 0.5 + 0.5) : light;
@@ -379,10 +388,16 @@ Ray get_primary_ray(vec2 uv) {
 }
 
 void main() {
+	// TODO: try random numbers rendering into a texture, and then
+	// successive frames use those values as seeds
+	// this would be a true "random" instead of changing the seed every frame
+	// it gets less random the larger the seed is (try adding 100000u to frame_index)
+	//, so shouldn't change the seed
 	float seed = rand1f(rand1f(gl_FragCoord.xy) * float(frame_index));
 	vec2 uv = gl_FragCoord.xy / scr_size;
 
 	Ray primary = get_primary_ray(uv);
+	// vec3 color = rand3f(seed);
 	vec3 color = get_color(primary, seed);
 	if (frame_index > 1u && accumulate == 1u) {
 		color += uintBitsToFloat(texture(image, uv).rgb);
