@@ -19,6 +19,14 @@ pub struct Raytracer {
 	ray_dirs_program: Program,
 	ray_dirs_verts: VertexArray,
 
+	// prepass calculates noise based on the noise of the previous frame
+	// this prevents large seeds leading to less randomness
+	noise_fbo: Framebuffer,
+	noise_texture_0: Texture,
+	noise_texture_1: Texture,
+	noise_program: Program,
+	noise_verts: VertexArray,
+
 	accumulation_fbo: Framebuffer,
 	accumulation_texture_0: Texture,
 	accumulation_texture_1: Texture,
@@ -160,14 +168,19 @@ impl Raytracer {
 		unsafe {
 			// {{{ create shader programs
 			let ray_dirs_program = gl.create_program().expect("create program failed");
+			let noise_program = gl.create_program().expect("create program failed");
 			let program = gl.create_program().expect("create program failed");
 			let final_program = gl.create_program().expect("create program failed");
 
-			compile_shaders(gl, ray_dirs_program, fragment_shader!("ray_dirs_fsh.glsl"));
+			compile_shaders(gl, ray_dirs_program, fragment_shader!("ray_dirs.glsl"));
+			compile_shaders(gl, noise_program, fragment_shader!("noise.glsl"));
 			compile_shaders(gl, program, fragment_shader!("fsh.glsl"));
-			compile_shaders(gl, final_program, fragment_shader!("final_fsh.glsl"));
+			compile_shaders(gl, final_program, fragment_shader!("final.glsl"));
 
 			let ray_dirs_verts = gl
+				.create_vertex_array()
+				.expect("create vertex array failed");
+			let noise_verts = gl
 				.create_vertex_array()
 				.expect("create vertex array failed");
 			let verts = gl
@@ -176,6 +189,47 @@ impl Raytracer {
 			let final_verts = gl
 				.create_vertex_array()
 				.expect("create vertex array failed");
+			// }}}
+
+			// {{{ create prepass (ray dirs) FBO and texture
+			let ray_dirs_fbo = gl.create_framebuffer().expect("create FBO failed");
+			let ray_dirs_texture = gl.create_texture().expect("create texture failed");
+
+			gl.bind_texture(glow::TEXTURE_2D, Some(ray_dirs_texture));
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(ray_dirs_fbo));
+			screen_sized_texture(gl, scr_size, true);
+			framebuffer_texture(gl, ray_dirs_texture);
+			gl.bind_texture(glow::TEXTURE_2D, None);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+
+			let fbo_status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+			assert!(
+				fbo_status == glow::FRAMEBUFFER_COMPLETE,
+				"framebuffer incomplete: {fbo_status}"
+			);
+			// }}}
+
+			// {{{ create prepass (noise) FBO and texture
+			let noise_fbo = gl.create_framebuffer().expect("create FBO failed");
+			let noise_texture_0 = gl.create_texture().expect("create texture failed");
+			let noise_texture_1 = gl.create_texture().expect("create texture failed");
+
+			gl.bind_texture(glow::TEXTURE_2D, Some(noise_texture_0));
+			screen_sized_texture(gl, scr_size, true);
+			gl.bind_texture(glow::TEXTURE_2D, Some(noise_texture_1));
+			screen_sized_texture(gl, scr_size, true);
+
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(noise_fbo));
+			framebuffer_texture(gl, noise_texture_0);
+
+			gl.bind_texture(glow::TEXTURE_2D, None);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+
+			let fbo_status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+			assert!(
+				fbo_status == glow::FRAMEBUFFER_COMPLETE,
+				"framebuffer incomplete: {fbo_status}"
+			);
 			// }}}
 
 			// {{{ create accumulation FBO and texture
@@ -203,24 +257,6 @@ impl Raytracer {
 			);
 			// }}}
 
-			// {{{ create prepass FBO and texture
-			let ray_dirs_fbo = gl.create_framebuffer().expect("create FBO failed");
-			let ray_dirs_texture = gl.create_texture().expect("create texture failed");
-
-			gl.bind_texture(glow::TEXTURE_2D, Some(ray_dirs_texture));
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(ray_dirs_fbo));
-			screen_sized_texture(gl, scr_size, true);
-			framebuffer_texture(gl, ray_dirs_texture);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-
-			let fbo_status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
-			assert!(
-				fbo_status == glow::FRAMEBUFFER_COMPLETE,
-				"framebuffer incomplete: {fbo_status}"
-			);
-			// }}}
-
 			let mut this = Self {
 				clear_fbo: gl.create_framebuffer().expect("create FBO failed"),
 
@@ -228,6 +264,12 @@ impl Raytracer {
 				ray_dirs_texture,
 				ray_dirs_program,
 				ray_dirs_verts,
+
+				noise_fbo,
+				noise_texture_0,
+				noise_texture_1,
+				noise_program,
+				noise_verts,
 
 				accumulation_fbo,
 				accumulation_texture_0,
@@ -278,8 +320,11 @@ impl Raytracer {
 	// {{{ call on every frame to render
 	pub fn paint(&mut self, gl: &Context, data: &PersistentData) {
 		unsafe {
-			// {{{ draw ray traced image into accumulation buffer
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+			// {{{ calculate noise texture
+			// }}}
+
+			// {{{ draw ray traced image into accumulation buffer
 			gl.use_program(Some(self.program));
 
 			self.apply_uniforms(gl, data);
@@ -410,6 +455,10 @@ impl Raytracer {
 		unsafe {
 			gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
 			screen_sized_texture(gl, scr_size, false);
+			gl.bind_texture(glow::TEXTURE_2D, Some(self.noise_texture_0));
+			screen_sized_texture(gl, scr_size, true);
+			gl.bind_texture(glow::TEXTURE_2D, Some(self.noise_texture_1));
+			screen_sized_texture(gl, scr_size, true);
 			gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_0));
 			screen_sized_texture(gl, scr_size, true);
 			gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_1));
@@ -420,6 +469,15 @@ impl Raytracer {
 	fn clear_textures(&self, gl: &Context) {
 		unsafe {
 			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.clear_fbo));
+
+			framebuffer_texture(gl, self.noise_texture_0);
+			gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
+			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
+			framebuffer_texture(gl, self.noise_texture_1);
+			gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
+			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+
 			framebuffer_texture(gl, self.accumulation_texture_0);
 			gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
 			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
