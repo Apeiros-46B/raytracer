@@ -38,7 +38,7 @@ pub struct Raytracer {
 
 	scr_size: glm::Vec2,
 	first_frame: bool,
-	using_texture_0: bool,
+	rendering_to_texture_0: bool,
 	pub frame_index: u32,
 
 	pub force_scr_size: bool,
@@ -282,7 +282,7 @@ impl Raytracer {
 
 				scr_size,
 				first_frame: true,
-				using_texture_0: true,
+				rendering_to_texture_0: true,
 
 				// this starts at one to avoid division by zero
 				frame_index: 1,
@@ -313,118 +313,6 @@ impl Raytracer {
 
 			gl.delete_program(self.final_program);
 			gl.delete_vertex_array(self.final_verts);
-		}
-	}
-	// }}}
-
-	// {{{ call on every frame to render
-	pub fn paint(&mut self, gl: &Context, data: &PersistentData) {
-		unsafe {
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-			// {{{ calculate noise texture
-			// }}}
-
-			// {{{ draw ray traced image into accumulation buffer
-			gl.use_program(Some(self.program));
-
-			self.apply_uniforms(gl, data);
-
-			// bind samplers
-			if self.first_frame {
-				gl.uniform_1_i32(
-					gl.get_uniform_location(self.program, "ray_dirs").as_ref(),
-					0, // ray directions texture
-				);
-				gl.uniform_1_i32(
-					gl.get_uniform_location(self.program, "image").as_ref(),
-					1, // accumulation texture, one of the two buffers
-				);
-			}
-			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
-
-			// which texture to sample from (the one that isn't being rendered to)
-			gl.active_texture(glow::TEXTURE1);
-			gl.bind_texture(
-				glow::TEXTURE_2D,
-				Some(if self.using_texture_0 {
-					self.accumulation_texture_1
-				} else {
-					self.accumulation_texture_0
-				}),
-			);
-
-			// draw into accumulation buffer
-			gl.bind_vertex_array(Some(self.verts));
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.accumulation_fbo));
-
-			// unbind the other texture (the one that is being sampled)
-			framebuffer_texture(
-				gl,
-				if self.using_texture_0 {
-					self.accumulation_texture_0
-				} else {
-					self.accumulation_texture_1
-				},
-			);
-
-			gl.draw_arrays(glow::TRIANGLES, 0, 3);
-
-			// unbind
-			gl.bind_vertex_array(None);
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			// }}}
-
-			// render accumulation buffer with post-process effects
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-			gl.use_program(Some(self.final_program));
-
-			// {{{ uniforms
-			// texture sampler
-			gl.uniform_1_i32(
-				gl.get_uniform_location(self.final_program, "image")
-					.as_ref(),
-				0,
-			);
-
-			gl.uniform_2_f32(
-				gl.get_uniform_location(self.final_program, "scr_size")
-					.as_ref(),
-				self.scr_size.x,
-				self.scr_size.y,
-			);
-
-			gl.uniform_1_u32(
-				gl.get_uniform_location(self.final_program, "frame_index")
-					.as_ref(),
-				self.frame_index,
-			);
-
-			gl.uniform_1_u32(
-				gl.get_uniform_location(self.final_program, "accumulate")
-					.as_ref(),
-				data.settings.render.accumulate as u32,
-			);
-			// }}}
-
-			// sample from the one that just got rendered to
-			gl.active_texture(glow::TEXTURE0);
-			if self.using_texture_0 {
-				gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_0));
-			} else {
-				gl.bind_texture(glow::TEXTURE_2D, Some(self.accumulation_texture_1));
-			}
-			gl.bind_vertex_array(Some(self.final_verts));
-			gl.draw_arrays(glow::TRIANGLES, 0, 3);
-
-			gl.bind_texture(glow::TEXTURE_2D, None);
-			gl.bind_vertex_array(None);
-			gl.use_program(Some(self.program));
-
-			self.first_frame = false;
-			self.frame_index += 1;
-			self.using_texture_0 = !self.using_texture_0;
 		}
 	}
 	// }}}
@@ -476,8 +364,6 @@ impl Raytracer {
 			framebuffer_texture(gl, self.noise_texture_1);
 			gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
 			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
-			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-
 			framebuffer_texture(gl, self.accumulation_texture_0);
 			gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
 			gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0, 0, 0, 0]);
@@ -494,13 +380,9 @@ impl Raytracer {
 		unsafe {
 			gl.use_program(Some(self.ray_dirs_program));
 
-			// bind uniforms for ray direction calculation
-			gl.uniform_2_f32(
-				gl.get_uniform_location(self.ray_dirs_program, "scr_size")
-					.as_ref(),
-				self.scr_size.x,
-				self.scr_size.y,
-			);
+			// {{{ bind uniforms for ray direction calculation
+			self.apply_uniforms_common(gl, self.ray_dirs_program);
+
 			gl.uniform_matrix_4_f32_slice(
 				gl.get_uniform_location(self.ray_dirs_program, "inv_proj")
 					.as_ref(),
@@ -513,6 +395,7 @@ impl Raytracer {
 				false, // no transpose, it's already in column-major order
 				camera.inv_view.as_slice(),
 			);
+			// }}}
 
 			// draw into framebuffer
 			gl.bind_vertex_array(Some(self.ray_dirs_verts));
@@ -531,16 +414,174 @@ impl Raytracer {
 	}
 	// }}}
 
+	// {{{ call on every frame to render
+	pub fn paint(&mut self, gl: &Context, data: &PersistentData) {
+		unsafe {
+			// {{{ calculate noise texture
+			gl.use_program(Some(self.noise_program));
+			gl.active_texture(glow::TEXTURE0);
+			gl.bind_texture(
+				glow::TEXTURE_2D,
+				Some(if self.rendering_to_texture_0 {
+					self.noise_texture_1
+				} else {
+					self.noise_texture_0
+				}),
+			);
+
+			// {{{ uniforms
+			self.apply_uniforms_common(gl, self.noise_program);
+
+			// texture sampler
+			gl.uniform_1_i32(
+				gl.get_uniform_location(self.noise_program, "noise")
+					.as_ref(),
+				0,
+			);
+			// }}}
+
+			gl.bind_vertex_array(Some(self.noise_verts));
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.noise_fbo));
+
+			// unbind the other texture (the one that is being sampled)
+			framebuffer_texture(
+				gl,
+				if self.rendering_to_texture_0 {
+					self.noise_texture_0
+				} else {
+					self.noise_texture_1
+				},
+			);
+
+			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
+			// unbind
+			gl.bind_vertex_array(None);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+			gl.bind_texture(glow::TEXTURE_2D, None);
+			// }}}
+
+			// {{{ draw ray traced image into accumulation buffer
+			gl.use_program(Some(self.program));
+
+			self.apply_uniforms(gl, data);
+
+			// {{{ bind textures
+			if self.first_frame {
+				gl.uniform_1_i32(
+					gl.get_uniform_location(self.program, "ray_dirs").as_ref(),
+					0, // ray directions texture
+				);
+				gl.uniform_1_i32(
+					gl.get_uniform_location(self.program, "noise").as_ref(),
+					1, // noise texture, one of two buffers
+				);
+				gl.uniform_1_i32(
+					gl.get_uniform_location(self.program, "image").as_ref(),
+					2, // accumulation texture, one of two buffers
+				);
+			}
+			gl.active_texture(glow::TEXTURE0);
+			gl.bind_texture(glow::TEXTURE_2D, Some(self.ray_dirs_texture));
+
+			// sample from the noise that just got generated
+			gl.active_texture(glow::TEXTURE1);
+			gl.bind_texture(
+				glow::TEXTURE_2D,
+				Some(if self.rendering_to_texture_0 {
+					self.noise_texture_0
+				} else {
+					self.noise_texture_1
+				}),
+			);
+
+			// sample from the one that isn't being rendered to
+			gl.active_texture(glow::TEXTURE2);
+			gl.bind_texture(
+				glow::TEXTURE_2D,
+				Some(if self.rendering_to_texture_0 {
+					self.accumulation_texture_1
+				} else {
+					self.accumulation_texture_0
+				}),
+			);
+			// }}}
+
+			// draw into accumulation buffer
+			gl.bind_vertex_array(Some(self.verts));
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.accumulation_fbo));
+
+			// unbind the other texture (the one that is being sampled)
+			framebuffer_texture(
+				gl,
+				if self.rendering_to_texture_0 {
+					self.accumulation_texture_0
+				} else {
+					self.accumulation_texture_1
+				},
+			);
+
+			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
+			// unbind
+			gl.bind_vertex_array(None);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+			gl.bind_texture(glow::TEXTURE_2D, None);
+			// }}}
+
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+
+			// {{{ render accumulation buffer with post-process effects
+			gl.use_program(Some(self.final_program));
+
+			// {{{ uniforms
+			self.apply_uniforms_common(gl, self.final_program);
+
+			// texture sampler
+			gl.uniform_1_i32(
+				gl.get_uniform_location(self.final_program, "image")
+					.as_ref(),
+				0,
+			);
+
+			gl.uniform_1_u32(
+				gl.get_uniform_location(self.final_program, "accumulate")
+					.as_ref(),
+				data.settings.render.accumulate as u32,
+			);
+			// }}}
+
+			// sample from the one that just got rendered to
+			gl.active_texture(glow::TEXTURE0);
+			gl.bind_texture(
+				glow::TEXTURE_2D,
+				Some(if self.rendering_to_texture_0 {
+					self.accumulation_texture_0
+				} else {
+					self.accumulation_texture_1
+				}),
+			);
+			gl.bind_vertex_array(Some(self.final_verts));
+			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
+			gl.bind_texture(glow::TEXTURE_2D, None);
+			gl.bind_vertex_array(None);
+			gl.use_program(Some(self.program));
+
+			self.first_frame = false;
+			self.frame_index += 1;
+			self.rendering_to_texture_0 = !self.rendering_to_texture_0;
+			// }}}
+		}
+	}
+	// }}}
+
 	// apply uniforms to main program
 	fn apply_uniforms(&mut self, gl: &Context, data: &PersistentData) {
 		unsafe {
-			// {{{ state
-			gl.uniform_2_f32(
-				gl.get_uniform_location(self.program, "scr_size").as_ref(),
-				self.scr_size.x,
-				self.scr_size.y,
-			);
+			self.apply_uniforms_common(gl, self.program);
 
+			// {{{ camera
 			gl.uniform_3_f32(
 				gl.get_uniform_location(self.program, "camera_pos").as_ref(),
 				data.camera.pos.x,
@@ -553,12 +594,6 @@ impl Raytracer {
 				data.camera.forward_dir.x,
 				data.camera.forward_dir.y,
 				data.camera.forward_dir.z,
-			);
-
-			gl.uniform_1_u32(
-				gl.get_uniform_location(self.program, "frame_index")
-					.as_ref(),
-				self.frame_index,
 			);
 			// }}}
 
@@ -596,6 +631,18 @@ impl Raytracer {
 				);
 
 				gl.uniform_1_f32_slice(
+					gl.get_uniform_location(self.program, "scene_mat_ior")
+						.as_ref(),
+					&fill_50(&data.scene.mat_ior),
+				);
+
+				gl.uniform_1_f32_slice(
+					gl.get_uniform_location(self.program, "scene_mat_specular")
+						.as_ref(),
+					&fill_50(&data.scene.mat_specular),
+				);
+
+				gl.uniform_1_f32_slice(
 					gl.get_uniform_location(self.program, "scene_mat_roughness")
 						.as_ref(),
 					&fill_50(&data.scene.mat_roughness),
@@ -611,12 +658,6 @@ impl Raytracer {
 					gl.get_uniform_location(self.program, "scene_mat_transmissive_opacity")
 						.as_ref(),
 					&fill_50(&data.scene.mat_transmissive_opacity),
-				);
-
-				gl.uniform_1_f32_slice(
-					gl.get_uniform_location(self.program, "scene_mat_transmissive_ior")
-						.as_ref(),
-					&fill_50(&data.scene.mat_transmissive_ior),
 				);
 
 				// transforms
@@ -696,7 +737,8 @@ impl Raytracer {
 				);
 
 				gl.uniform_1_u32(
-					gl.get_uniform_location(self.program, "samples_per_frame").as_ref(),
+					gl.get_uniform_location(self.program, "samples_per_frame")
+						.as_ref(),
 					data.settings.render.samples_per_frame,
 				);
 
@@ -715,6 +757,21 @@ impl Raytracer {
 				);
 				// }}}
 			}
+		}
+	}
+
+	fn apply_uniforms_common(&self, gl: &Context, program: Program) {
+		unsafe {
+			gl.uniform_2_f32(
+				gl.get_uniform_location(program, "scr_size").as_ref(),
+				self.scr_size.x,
+				self.scr_size.y,
+			);
+
+			gl.uniform_1_u32(
+				gl.get_uniform_location(program, "frame_index").as_ref(),
+				self.frame_index,
+			);
 		}
 	}
 }

@@ -24,10 +24,11 @@ pub struct Scene {
 	// object material properties
 	pub mat_ty: Vec<MaterialType>,
 	pub mat_color: Vec<[f32; 3]>,
+	pub mat_ior: Vec<f32>,
+	pub mat_specular: Vec<f32>,
 	pub mat_roughness: Vec<f32>,
 	pub mat_emissive_strength: Vec<f32>,
 	pub mat_transmissive_opacity: Vec<f32>,
-	pub mat_transmissive_ior: Vec<f32>,
 
 	// cached object transforms
 	pub transform: Vec<Mat4>,
@@ -359,7 +360,7 @@ impl Scene {
 
 			match self.mat_ty[self.selected] {
 				MaterialType::Solid => {
-					self.roughness_slider(ui);
+					self.common_sliders(ui);
 				},
 				MaterialType::Emissive => {
 					ui.horizontal(|ui| {
@@ -372,7 +373,7 @@ impl Scene {
 					});
 				},
 				MaterialType::Transmissive => {
-					self.roughness_slider(ui);
+					self.common_sliders(ui);
 					ui.horizontal(|ui| {
 						ui.label("Opacity:");
 						let slider = ui.add(Slider::new(
@@ -381,25 +382,37 @@ impl Scene {
 						));
 						self.update_response(slider);
 					});
-					ui.horizontal(|ui| {
-						ui.label("Index of refraction:");
-						let slider = ui.add(Slider::new(
-							&mut self.mat_transmissive_ior[self.selected],
-							0.0..=10.0,
-						));
-						self.update_response(slider);
-					});
 				},
 			}
 		});
 	}
 
-	fn roughness_slider(&mut self, ui: &mut Ui) {
+	fn common_sliders(&mut self, ui: &mut Ui) {
 		ui.horizontal(|ui| {
-			ui.label("Roughness:");
+			ui.label("Specular:");
 			let slider = ui.add(Slider::new(
-				&mut self.mat_roughness[self.selected],
+				&mut self.mat_specular[self.selected],
 				0.0..=1.0,
+			));
+			self.update_response(slider);
+		});
+
+		if self.mat_specular[self.selected] > 0.0 {
+			ui.horizontal(|ui| {
+				ui.label("Roughness:");
+				let slider = ui.add(Slider::new(
+					&mut self.mat_roughness[self.selected],
+					0.0..=1.0,
+				));
+				self.update_response(slider);
+			});
+		}
+
+		ui.horizontal(|ui| {
+			ui.label("Index of refraction:");
+			let slider = ui.add(Slider::new(
+				&mut self.mat_ior[self.selected],
+				1.0..=10.0,
 			));
 			self.update_response(slider);
 		});
@@ -422,9 +435,10 @@ impl Scene {
 
 		self.mat_ty.push(MaterialType::Solid);
 		self.mat_color.push([0.9, 0.9, 0.9]);
-		self.mat_roughness.push(0.5);
+		self.mat_ior.push(1.333);
+		self.mat_specular.push(1.0);
+		self.mat_roughness.push(1.0);
 		self.mat_emissive_strength.push(1.0);
-		self.mat_transmissive_ior.push(1.333);
 		self.mat_transmissive_opacity.push(0.1);
 
 		self.transform.push(glm::identity());
@@ -451,11 +465,12 @@ impl Scene {
 
 		self.mat_ty.push(self.mat_ty[i]);
 		self.mat_color.push(self.mat_color[i]);
+		self.mat_ior.push(self.mat_ior[i]);
+		self.mat_specular.push(self.mat_specular[i]);
 		self.mat_roughness.push(self.mat_roughness[i]);
 		self
 			.mat_emissive_strength
 			.push(self.mat_emissive_strength[i]);
-		self.mat_transmissive_ior.push(self.mat_transmissive_ior[i]);
 		self
 			.mat_transmissive_opacity
 			.push(self.mat_transmissive_opacity[i]);
@@ -482,9 +497,10 @@ impl Scene {
 
 		self.mat_ty.remove(i);
 		self.mat_color.remove(i);
+		self.mat_ior.remove(i);
+		self.mat_specular.remove(i);
 		self.mat_roughness.remove(i);
 		self.mat_emissive_strength.remove(i);
-		self.mat_transmissive_ior.remove(i);
 		self.mat_transmissive_opacity.remove(i);
 
 		self.transform.remove(i);
@@ -522,22 +538,18 @@ impl Scene {
 	}
 
 	pub fn with_default_scene(mut self) -> Self {
-		self.new_object();
-
 		// pretty rough metallic sphere
+		self.new_object();
 		self.mat_roughness[self.selected] = 0.6;
 
-		self.new_object();
-
 		// dark matte floor
+		self.new_object();
 		self.name[self.selected] = "Floor".to_string();
 		self.ty[self.selected] = ObjectType::Box;
 		self.position[self.selected] = vec3(0.0, -1.001, 0.0);
 		self.rotation[self.selected] = vec3(0.0, 0.0, 0.0);
 		self.scale[self.selected] = vec3(1000.0, 0.001, 1000.0);
-
 		self.mat_color[self.selected] = [0.1, 0.1, 0.1];
-		self.mat_roughness[self.selected] = 1.0;
 
 		self.recalc_transforms();
 

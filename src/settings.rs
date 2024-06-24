@@ -80,6 +80,7 @@ pub enum RenderMode {
 	Fresnel = 5,
 	Roughness = 6,
 	RayDir = 7,
+	Noise = 8,
 }
 
 impl std::fmt::Display for RenderMode {
@@ -93,6 +94,7 @@ impl std::fmt::Display for RenderMode {
 			Self::Fresnel => write!(f, "Fresnel (debug)"),
 			Self::Roughness => write!(f, "Roughness (debug)"),
 			Self::RayDir => write!(f, "Ray direction (debug)"),
+			Self::Noise => write!(f, "Noise (debug)"),
 		}
 	}
 }
@@ -206,6 +208,7 @@ impl Settings {
 									RenderMode::Fresnel,
 									RenderMode::Roughness,
 									RenderMode::RayDir,
+									RenderMode::Noise,
 								],
 							},
 						);
