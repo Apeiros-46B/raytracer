@@ -21,22 +21,21 @@ struct RayHit {
 	float distance;
 };
 
-const uint RENDER_PREVIEW   = 0u;
-const uint RENDER_REALISTIC = 1u;
-const uint RENDER_POSITION  = 2u;
-const uint RENDER_NORMAL    = 3u;
-const uint RENDER_DEPTH     = 4u;
-const uint RENDER_FRESNEL   = 5u;
-const uint RENDER_ROUGHNESS = 6u;
-const uint RENDER_RAY_DIR   = 7u;
-const uint RENDER_NOISE     = 8u;
+const uint RENDER_PREVIEW    = 0u;
+const uint RENDER_REALISTIC  = 1u;
+const uint RENDER_POSITION   = 2u;
+const uint RENDER_NORMAL     = 3u;
+const uint RENDER_DEPTH      = 4u;
+const uint RENDER_FRESNEL    = 5u;
+const uint RENDER_ROUGHNESS  = 6u;
+const uint RENDER_RAY_DIR    = 7u;
+const uint RENDER_NOISE      = 8u;
 
-const uint OBJ_TYPE_SPHERE = 0u;
-const uint OBJ_TYPE_BOX    = 1u;
+const uint OBJ_TYPE_SPHERE   = 0u;
+const uint OBJ_TYPE_BOX      = 1u;
 
-const uint MAT_TYPE_SOLID        = 0u;
-const uint MAT_TYPE_EMISSIVE     = 1u;
-const uint MAT_TYPE_TRANSMISSIVE = 2u;
+const uint MAT_TYPE_SOLID    = 0u;
+const uint MAT_TYPE_EMISSIVE = 1u;
 // }}}
 
 // 0x7f7f_fff = 0b0_11111110_11111111111111111111111 = 2139095039
@@ -70,7 +69,6 @@ uniform float scene_mat_ior[MAX_SCENE_SIZE];
 uniform float scene_mat_specular[MAX_SCENE_SIZE];
 uniform float scene_mat_roughness[MAX_SCENE_SIZE];
 uniform float scene_mat_emissive_strength[MAX_SCENE_SIZE];
-uniform float scene_mat_transmissive_opacity[MAX_SCENE_SIZE];
 
 // transforms
 uniform mat4 scene_transform[MAX_SCENE_SIZE];
@@ -308,8 +306,6 @@ vec3 path_trace(Ray ray, float seed) {
 			       * scene_mat_color[i]
 			       * scene_mat_emissive_strength[i];
 			break;
-		} else if (m == MAT_TYPE_TRANSMISSIVE) {
-			// TODO: implement glass
 		}
 
 		float r = scene_mat_roughness[i];

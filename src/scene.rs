@@ -28,7 +28,6 @@ pub struct Scene {
 	pub mat_specular: Vec<f32>,
 	pub mat_roughness: Vec<f32>,
 	pub mat_emissive_strength: Vec<f32>,
-	pub mat_transmissive_opacity: Vec<f32>,
 
 	// cached object transforms
 	pub transform: Vec<Mat4>,
@@ -80,7 +79,6 @@ impl Display for ObjectType {
 pub enum MaterialType {
 	Solid = 0,
 	Emissive = 1,
-	Transmissive = 2,
 }
 
 impl Display for MaterialType {
@@ -88,7 +86,6 @@ impl Display for MaterialType {
 		match self {
 			MaterialType::Solid => write!(f, "Solid"),
 			MaterialType::Emissive => write!(f, "Light source"),
-			MaterialType::Transmissive => write!(f, "Glass"),
 		}
 	}
 }
@@ -345,7 +342,6 @@ impl Scene {
 							[
 								MaterialType::Solid,
 								MaterialType::Emissive,
-								MaterialType::Transmissive,
 							],
 						},
 					);
@@ -360,7 +356,32 @@ impl Scene {
 
 			match self.mat_ty[self.selected] {
 				MaterialType::Solid => {
-					self.common_sliders(ui);
+					ui.horizontal(|ui| {
+						ui.label("Specular:");
+						let slider = ui.add(Slider::new(
+							&mut self.mat_specular[self.selected],
+							0.0..=1.0,
+						));
+						self.update_response(slider);
+					});
+					if self.mat_specular[self.selected] > 0.0 {
+						ui.horizontal(|ui| {
+							ui.label("Roughness:");
+							let slider = ui.add(Slider::new(
+								&mut self.mat_roughness[self.selected],
+								0.0..=1.0,
+							));
+							self.update_response(slider);
+						});
+					}
+					ui.horizontal(|ui| {
+						ui.label("Index of refraction:");
+						let slider = ui.add(Slider::new(
+							&mut self.mat_ior[self.selected],
+							1.0..=10.0,
+						));
+						self.update_response(slider);
+					});
 				},
 				MaterialType::Emissive => {
 					ui.horizontal(|ui| {
@@ -372,49 +393,7 @@ impl Scene {
 						self.update_response(slider);
 					});
 				},
-				MaterialType::Transmissive => {
-					self.common_sliders(ui);
-					ui.horizontal(|ui| {
-						ui.label("Opacity:");
-						let slider = ui.add(Slider::new(
-							&mut self.mat_transmissive_opacity[self.selected],
-							0.0..=1.0,
-						));
-						self.update_response(slider);
-					});
-				},
 			}
-		});
-	}
-
-	fn common_sliders(&mut self, ui: &mut Ui) {
-		ui.horizontal(|ui| {
-			ui.label("Specular:");
-			let slider = ui.add(Slider::new(
-				&mut self.mat_specular[self.selected],
-				0.0..=1.0,
-			));
-			self.update_response(slider);
-		});
-
-		if self.mat_specular[self.selected] > 0.0 {
-			ui.horizontal(|ui| {
-				ui.label("Roughness:");
-				let slider = ui.add(Slider::new(
-					&mut self.mat_roughness[self.selected],
-					0.0..=1.0,
-				));
-				self.update_response(slider);
-			});
-		}
-
-		ui.horizontal(|ui| {
-			ui.label("Index of refraction:");
-			let slider = ui.add(Slider::new(
-				&mut self.mat_ior[self.selected],
-				1.0..=10.0,
-			));
-			self.update_response(slider);
 		});
 	}
 	// }}}
@@ -439,7 +418,6 @@ impl Scene {
 		self.mat_specular.push(1.0);
 		self.mat_roughness.push(1.0);
 		self.mat_emissive_strength.push(1.0);
-		self.mat_transmissive_opacity.push(0.1);
 
 		self.transform.push(glm::identity());
 		self.inv_transform.push(glm::identity());
@@ -471,9 +449,6 @@ impl Scene {
 		self
 			.mat_emissive_strength
 			.push(self.mat_emissive_strength[i]);
-		self
-			.mat_transmissive_opacity
-			.push(self.mat_transmissive_opacity[i]);
 
 		self.transform.push(self.transform[i]);
 		self.inv_transform.push(self.inv_transform[i]);
@@ -501,7 +476,6 @@ impl Scene {
 		self.mat_specular.remove(i);
 		self.mat_roughness.remove(i);
 		self.mat_emissive_strength.remove(i);
-		self.mat_transmissive_opacity.remove(i);
 
 		self.transform.remove(i);
 		self.inv_transform.remove(i);

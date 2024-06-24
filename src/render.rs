@@ -654,12 +654,6 @@ impl Raytracer {
 					&fill_50(&data.scene.mat_emissive_strength),
 				);
 
-				gl.uniform_1_f32_slice(
-					gl.get_uniform_location(self.program, "scene_mat_transmissive_opacity")
-						.as_ref(),
-					&fill_50(&data.scene.mat_transmissive_opacity),
-				);
-
 				// transforms
 				gl.uniform_matrix_4_f32_slice(
 					gl.get_uniform_location(self.program, "scene_transform")
