@@ -34,7 +34,7 @@ impl Default for WorldSettings {
 			sun_strength: 1.0,
 			sun_rotation: 45.0_f32.to_radians(),
 			sun_elevation: 45.0_f32.to_radians(),
-			sun_color: [1.0, 1.0, 1.0],
+			sun_color: [0.0, 0.0, 0.0],
 			sky_color: [0.6, 0.6, 0.6],
 		}
 	}
@@ -154,7 +154,7 @@ impl Settings {
 			// {{{ world settings
 			ui.collapsing("World settings", |ui| {
 				ui.horizontal(|ui| {
-					ui.label("Sky color:");
+					ui.label("Sky color/Ambient light:");
 					let color = ui.color_edit_button_rgb(&mut self.world.sky_color);
 					self.update_response(color);
 				});
